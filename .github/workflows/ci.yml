@@ -19,3 +19,4 @@ jobs:
       - run: python -m pip install -e ".[test]"
       - run: pytest
       - run: fttl-train-smoke --config configs/smoke.json --output artifacts/ci-smoke
+      - run: fttl-compare-tuning --config configs/smoke.json --output artifacts/ci-tuning-comparison/result.json

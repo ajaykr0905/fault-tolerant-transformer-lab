@@ -16,7 +16,7 @@ An evidence-first AI infrastructure project that begins with deterministic CPU t
 
 - Multi-GPU or FSDP execution.
 - vLLM or SGLang serving performance.
-- LoRA versus full-fine-tuning results.
+- Model-quality or runtime superiority from the small LoRA comparison.
 - OpenTelemetry, Prometheus, and Grafana measurements.
 - Production-scale throughput, latency, memory, cost, or recovery time.
 
@@ -51,11 +51,10 @@ The public `artifacts/cpu-smoke/` directory records the verified manifest and re
 ## Next evidence gates
 
 1. Public-dataset baseline and controlled ablations.
-2. LoRA versus full-fine-tuning comparison.
-3. Real NVIDIA GPU and multi-GPU execution with hardware metadata.
-4. vLLM or SGLang serving with failure injection.
-5. OpenTelemetry, Prometheus, and Grafana instrumentation.
-6. Throughput, utilization, memory, p50/p95/p99 latency, cost, and recovery report.
+2. Real NVIDIA GPU and multi-GPU execution with hardware metadata.
+3. vLLM or SGLang serving with failure injection.
+4. OpenTelemetry, Prometheus, and Grafana instrumentation.
+5. Throughput, utilization, memory, p50/p95/p99 latency, cost, and recovery report.
 
 ## Clean-room statement
 
