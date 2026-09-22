@@ -1,0 +1,18 @@
+{
+  "artifact_kind": "verified local CPU smoke run",
+  "checkpoint_published": false,
+  "config_fingerprint": "039b3576a746f1d5cdbd9c2b3054121608af083f4cf62d48e232a59e202e17e7",
+  "device": "cpu",
+  "elapsed_seconds": 0.182127,
+  "final_loss": 4.0216145515441895,
+  "initial_loss": 4.157115936279297,
+  "python_version": "3.12.14",
+  "steps": 8,
+  "tokens_seen": 512,
+  "torch_version": "2.14.0",
+  "limitations": [
+    "This is a deterministic engineering smoke workload, not a language quality benchmark.",
+    "It contains no GPU, multi-GPU, serving, throughput, or latency claim.",
+    "The binary checkpoint is intentionally excluded from source control."
+  ]
+}

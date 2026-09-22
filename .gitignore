@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+*.pt
+artifacts/*
+!artifacts/smoke/
+!artifacts/smoke/.gitkeep
+!artifacts/cpu-smoke/
+artifacts/cpu-smoke/*
+!artifacts/cpu-smoke/manifest.json
+!artifacts/cpu-smoke/result.json
+.DS_Store

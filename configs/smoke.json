@@ -1,0 +1,15 @@
+{
+  "model": {
+    "vocab_size": 64,
+    "block_size": 16,
+    "d_model": 32,
+    "n_heads": 4,
+    "n_layers": 2,
+    "dropout": 0.0
+  },
+  "seed": 2712,
+  "steps": 8,
+  "batch_size": 4,
+  "learning_rate": 0.0003,
+  "checkpoint_every": 4
+}
