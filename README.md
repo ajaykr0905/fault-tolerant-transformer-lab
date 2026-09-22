@@ -10,6 +10,7 @@ An evidence-first AI infrastructure project that begins with deterministic CPU t
 - Atomic checkpoints containing the model, optimizer, configuration fingerprint, step, token count, loss history, and RNG state.
 - Exact equality between uninterrupted training and checkpoint-restarted training in the CPU test configuration.
 - Machine-readable experiment manifest and result artifact.
+- A controlled full-tuning versus LoRA comparison with identical base weights, batches, seed, and optimizer settings.
 
 ## Explicitly not claimed yet
 
@@ -29,6 +30,7 @@ source .venv/bin/activate
 python -m pip install -e ".[test]"
 pytest
 fttl-train-smoke --config configs/smoke.json --output artifacts/local-smoke
+fttl-compare-tuning --config configs/smoke.json --output artifacts/tuning-comparison/result.json
 ```
 
 The smoke run uses a deterministic synthetic token stream. It is an engineering verification workload, not a language-quality benchmark.
@@ -39,6 +41,8 @@ The public `artifacts/cpu-smoke/` directory records the verified manifest and re
 
 - `src/fttl/model.py` — causal attention and the small transformer.
 - `src/fttl/checkpoint.py` — atomic, configuration-bound checkpoints.
+- `src/fttl/lora.py` — low-rank adapters with frozen base weights.
+- `src/fttl/ablation.py` — controlled full versus LoRA experiment.
 - `src/fttl/train.py` — deterministic training and restart path.
 - `configs/` — versioned experiment manifests.
 - `tests/` — gradient, causal, and recovery verification.

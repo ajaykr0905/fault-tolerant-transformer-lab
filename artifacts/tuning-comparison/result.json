@@ -1,0 +1,28 @@
+{
+  "config_fingerprint": "039b3576a746f1d5cdbd9c2b3054121608af083f4cf62d48e232a59e202e17e7",
+  "device": "cpu",
+  "full": {
+    "elapsed_seconds": 0.093185,
+    "final_loss": 4.0216145515441895,
+    "initial_loss": 4.157115936279297,
+    "mode": "full",
+    "total_parameters": 28032,
+    "trainable_parameters": 28032
+  },
+  "limitations": [
+    "Synthetic tokens measure implementation behavior, not language quality.",
+    "Elapsed time is a local CPU observation and not a hardware-independent benchmark.",
+    "The comparison does not claim GPU, multi-GPU, memory, or production serving results."
+  ],
+  "lora": {
+    "elapsed_seconds": 0.031054,
+    "final_loss": 4.14763069152832,
+    "initial_loss": 4.157115936279297,
+    "mode": "lora",
+    "total_parameters": 29568,
+    "trainable_parameters": 1536
+  },
+  "python_version": "3.12.14",
+  "schema_version": 1,
+  "torch_version": "2.14.0"
+}

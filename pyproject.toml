@@ -18,6 +18,7 @@ serve = ["vllm>=0.7,<1", "prometheus-client>=0.21,<1"]
 
 [project.scripts]
 fttl-train-smoke = "fttl.cli:main"
+fttl-compare-tuning = "fttl.ablation_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

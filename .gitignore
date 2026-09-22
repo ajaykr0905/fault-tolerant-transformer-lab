@@ -11,4 +11,7 @@ artifacts/*
 artifacts/cpu-smoke/*
 !artifacts/cpu-smoke/manifest.json
 !artifacts/cpu-smoke/result.json
+!artifacts/tuning-comparison/
+artifacts/tuning-comparison/*
+!artifacts/tuning-comparison/result.json
 .DS_Store
