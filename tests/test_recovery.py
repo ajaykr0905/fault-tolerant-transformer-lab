@@ -84,6 +84,14 @@ def test_training_rejects_non_positive_stop_boundary(tmp_path: Path):
         run_training(tiny_config(), tmp_path / "run", stop_after_step=0)
 
 
+def test_fresh_training_refuses_to_overwrite_an_existing_run(tmp_path: Path):
+    output = tmp_path / "run"
+    run_training(tiny_config(), output, stop_after_step=2)
+
+    with pytest.raises(ValueError, match="empty output directory"):
+        run_training(tiny_config(), output)
+
+
 def test_trusted_legacy_synthetic_checkpoint_has_an_explicit_v2_migration_path(
     tmp_path: Path,
 ):

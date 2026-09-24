@@ -158,6 +158,15 @@ def run_training(
         raise ValueError(f"unknown failure point {failure_point!r}")
     if failure_step is not None and failure_point is None:
         raise ValueError("failure_step requires failure_point")
+    if (
+        resume_from is None
+        and output_dir.exists()
+        and any(output_dir.iterdir())
+    ):
+        raise ValueError(
+            "fresh training requires an empty output directory; "
+            "use --resume or choose a new output path"
+        )
 
     source = _batch_source(config, dataset_manifest)
     implementation_fingerprint = code_fingerprint()
