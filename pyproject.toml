@@ -8,7 +8,8 @@ version = "0.2.0"
 description = "A reproducible small-transformer lab for checkpoint recovery and controlled experiments."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Ajay Kumar Pondugala" }]
 dependencies = ["numpy>=2,<3", "torch>=2.10,<3"]
 
