@@ -42,9 +42,13 @@ class DatasetSource:
     expected_document_count: int
     license: str
     license_limitations: tuple[str, ...]
+    artifact_kind: str = "gzip-jsonl"
+    url_override: str | None = None
 
     @property
     def url(self) -> str:
+        if self.url_override is not None:
+            return self.url_override
         return f"https://huggingface.co/datasets/{self.repository}/resolve/{self.revision}/{self.path}"
 
     def validate(self) -> None:
@@ -55,6 +59,8 @@ class DatasetSource:
             raise DatasetValidationError("expected document count must be positive")
         if not self.license:
             raise DatasetValidationError("dataset license must not be empty")
+        if not self.artifact_kind:
+            raise DatasetValidationError("dataset artifact kind must not be empty")
 
 
 PINNED_PEP_SOURCE = DatasetSource(
@@ -267,6 +273,32 @@ def prepare_peps(
     return _write_prepared_dataset(records, output_dir, archive_path=archive_path, source=source)
 
 
+def prepare_document_records(
+    records: Sequence[Mapping[str, object]],
+    output_dir: Path,
+    *,
+    source_artifact: Path,
+    source: DatasetSource,
+) -> DatasetManifestV1:
+    """Prepare already captured records through the same deterministic contract."""
+
+    source.validate()
+    if len(records) != source.expected_document_count:
+        raise DatasetValidationError(
+            f"source contains {len(records)} documents; expected {source.expected_document_count}"
+        )
+    _verify_file(source_artifact, source.compressed_sha256, "source artifact")
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        raise DatasetValidationError(f"output directory already exists: {output_dir}")
+    return _write_prepared_dataset(
+        records,
+        output_dir,
+        archive_path=source_artifact,
+        source=source,
+    )
+
+
 def load_dataset_manifest(path: Path) -> DatasetManifestV1:
     manifest_path = Path(path)
     if manifest_path.is_dir():
@@ -462,6 +494,9 @@ def _build_manifest_payload(
             "revision": source.revision,
             "path": source.path,
             "url": source.url,
+            "artifact_kind": source.artifact_kind,
+            "artifact_sha256": source.compressed_sha256,
+            "artifact_byte_length": archive_path.stat().st_size,
             "compressed_sha256": source.compressed_sha256,
             "compressed_byte_length": archive_path.stat().st_size,
         },
@@ -494,7 +529,7 @@ def _validate_manifest_contract(manifest: DatasetManifestV1) -> None:
     if _sha256_json(identity) != manifest.dataset_fingerprint:
         raise DatasetValidationError("dataset manifest fingerprint does not match its contents")
 
-    for field in ("repository", "revision", "path", "url"):
+    for field in ("repository", "revision", "path", "url", "artifact_kind"):
         value = manifest.source.get(field)
         if not isinstance(value, str) or not value:
             raise DatasetValidationError(f"dataset source field {field!r} must be a non-empty string")
@@ -502,9 +537,17 @@ def _validate_manifest_contract(manifest: DatasetManifestV1) -> None:
     if not isinstance(compressed_sha256, str):
         raise DatasetValidationError("dataset source compressed SHA-256 is missing")
     _require_sha256(compressed_sha256, "dataset source compressed SHA-256")
+    artifact_sha256 = manifest.source.get("artifact_sha256")
+    if not isinstance(artifact_sha256, str):
+        raise DatasetValidationError("dataset source artifact SHA-256 is missing")
+    _require_sha256(artifact_sha256, "dataset source artifact SHA-256")
+    if artifact_sha256 != compressed_sha256:
+        raise DatasetValidationError("dataset source artifact hashes are inconsistent")
     compressed_length = manifest.source.get("compressed_byte_length")
     if not isinstance(compressed_length, int) or isinstance(compressed_length, bool) or compressed_length <= 0:
         raise DatasetValidationError("dataset source compressed byte length must be positive")
+    if manifest.source.get("artifact_byte_length") != compressed_length:
+        raise DatasetValidationError("dataset source artifact byte lengths are inconsistent")
     description = manifest.license.get("description")
     limitations = manifest.license.get("limitations")
     if not isinstance(description, str) or not description:
