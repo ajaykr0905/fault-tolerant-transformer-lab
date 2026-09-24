@@ -24,7 +24,6 @@ from fttl.data import (
 from fttl.model import TinyTransformer
 from fttl.state import capture_rng_state, code_fingerprint, git_revision, state_digest
 
-
 FailurePoint = Literal[
     "before-forward",
     "after-backward",
@@ -318,15 +317,22 @@ def run_training(
             failure_injector = None
             if failure_point == "during-checkpoint-write" and attempted_step == failure_step:
 
-                def failure_injector(stage: str) -> None:
+                def failure_injector(
+                    stage: str,
+                    attempted_step_snapshot: int = attempted_step,
+                    durable_step_snapshot: int = durable_step,
+                    batch_id_snapshot: str = prepared.batch_id,
+                    sample_ids_snapshot: tuple[str, ...] = prepared.sample_ids,
+                    attempted_tokens_snapshot: int = attempted_tokens,
+                ) -> None:
                     if stage == "after-state-serialize":
                         _raise_injected(
                             "during-checkpoint-write",
-                            attempted_step=attempted_step,
-                            durable_step=durable_step,
-                            batch_id=prepared.batch_id,
-                            sample_ids=prepared.sample_ids,
-                            attempted_tokens=attempted_tokens,
+                            attempted_step=attempted_step_snapshot,
+                            durable_step=durable_step_snapshot,
+                            batch_id=batch_id_snapshot,
+                            sample_ids=sample_ids_snapshot,
+                            attempted_tokens=attempted_tokens_snapshot,
                         )
 
             manifest = save_checkpoint(

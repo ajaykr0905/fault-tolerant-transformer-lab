@@ -24,7 +24,6 @@ import torch
 from fttl.config import ExperimentConfig
 from fttl.state import capture_rng_state, restore_rng_state
 
-
 CHECKPOINT_SCHEMA_VERSION = 2
 DEFAULT_DATA_FINGERPRINT = "synthetic-token-stream-v1"
 DEFAULT_TOKENIZER_FINGERPRINT = "synthetic-tokenizer-v1"

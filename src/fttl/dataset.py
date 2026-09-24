@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
-
 DATASET_MANIFEST_SCHEMA = "DatasetManifestV1"
 TOKENIZER_NAME = "utf8-byte-v1"
 TOKENIZER_VOCAB_SIZE = 257

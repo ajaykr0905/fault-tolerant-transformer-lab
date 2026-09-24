@@ -10,7 +10,6 @@ from fttl.matrix import verify_recovery_matrix
 from fttl.recovery import verify_recovery
 from fttl.train import run_training
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "public_domain_peps_fixture.jsonl"
 
 

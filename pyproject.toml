@@ -13,8 +13,7 @@ authors = [{ name = "Ajay Kumar Pondugala" }]
 dependencies = ["numpy>=2,<3", "torch>=2.10,<3"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
-serve = ["vllm>=0.7,<1", "prometheus-client>=0.21,<1"]
+test = ["pytest>=8,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
 fttl-train-smoke = "fttl.cli:main"
@@ -30,3 +29,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I"]

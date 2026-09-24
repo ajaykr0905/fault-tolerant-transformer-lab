@@ -1,11 +1,14 @@
-import io
 import hashlib
+import io
 import json
 import urllib.error
 from pathlib import Path
 
 import pytest
 
+from fttl.config import ExperimentConfig, ModelConfig
+from fttl.dataset import load_dataset_manifest
+from fttl.recovery import verify_recovery
 from fttl.usgs import (
     USGS_FEEDS,
     USGSCaptureLedger,
@@ -15,10 +18,6 @@ from fttl.usgs import (
     parse_feature_collection,
     prepare_snapshot_dataset,
 )
-from fttl.config import ExperimentConfig, ModelConfig
-from fttl.dataset import load_dataset_manifest
-from fttl.recovery import verify_recovery
-
 
 FIXTURE = Path(__file__).parent / "fixtures" / "usgs_feed.json"
 SOURCE = "usgs-earthquakes-all-day"

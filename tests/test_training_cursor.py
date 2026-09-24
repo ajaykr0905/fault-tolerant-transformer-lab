@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-import torch
 import pytest
+import torch
 
 from fttl.config import ExperimentConfig, ModelConfig
 from fttl.data import PreparedDatasetBatchSource, SyntheticBatchSource, TrainingCursorV1

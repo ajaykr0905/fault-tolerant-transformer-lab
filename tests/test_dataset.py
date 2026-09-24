@@ -24,7 +24,6 @@ from fttl.dataset import (
     prepare_peps,
 )
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "public_domain_peps_fixture.jsonl"
 
 

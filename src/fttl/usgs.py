@@ -16,7 +16,6 @@ from typing import Any, BinaryIO
 
 from fttl.dataset import DatasetManifestV1, DatasetSource, prepare_document_records
 
-
 USGS_ATTRIBUTION = "U.S. Geological Survey (USGS)"
 USGS_LICENSE_NOTE = (
     "USGS-authored information is generally public domain; attribution is requested. "

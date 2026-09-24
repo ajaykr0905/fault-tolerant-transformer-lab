@@ -155,7 +155,7 @@ def verify_recovery(
             if replayed != failure.sample_ids:
                 raise RecoveryVerificationError(
                     "failed step did not replay the same sample identifiers"
-                )
+                ) from failure
             selected = recovered.recovered_from_generation
             if selected is not None:
                 selected_generations.append(selected)
