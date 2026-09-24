@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Ajay Kumar Pondugala" }]
-dependencies = ["numpy>=2,<3", "torch>=2.5,<3"]
+dependencies = ["numpy>=2,<3", "torch>=2.10,<3"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
