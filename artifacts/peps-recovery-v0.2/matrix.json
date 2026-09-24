@@ -1,75 +1,80 @@
 {
   "all_passed": true,
-  "code_fingerprint": "6685af36d731272a6725a2dd036befbebf7352601eebbd213afe331ec0f69cc5",
-  "code_revision": "3680e42bec73e9f352712318a1e30743ed3d8d58",
+  "code_fingerprint": "045ed43be9b980ab49b57fd79b4c0319cf8372be3547d4ab3f794a013f606c49",
+  "code_revision": "8477b8252c2cfbba584acd1024af65d1aef235a6",
+  "completed_steps": 6,
   "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
   "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
   "integrity_checks": {
     "changed_dataset_byte_rejected": true,
     "changed_model_config_rejected": true,
     "changed_tokenizer_rejected": true,
-    "corrupt_newest_falls_back_exactly": true
+    "corrupt_newest_manifest_falls_back_exactly": true,
+    "truncated_newest_state_falls_back_exactly": true
   },
   "limitations": [
     "Failures are deterministic Python crash surrogates, not OS-kill or power-loss tests.",
     "Results prove this pinned CPU run, not model quality, GPU scale, or production readiness.",
     "SHA-256 detects accidental corruption but does not authenticate attacker-controlled artifacts."
   ],
-  "run_contract_fingerprint": "6cd63180266337f1fb973ca6b12f699b79a13fdd94d1f99297a521d7c5612ad0",
+  "run_contract_fingerprint": "9ab8d151c9bbf504d387db8b4020c23cd050b425ffdef0fa03ec46238f8601e3",
+  "sample_windows": 12,
   "scenarios": [
     {
-      "checkpoint_selection_load_seconds": 0.031902,
+      "checkpoint_selection_load_seconds": 0.060167,
       "completed_restarts": 2,
       "discarded_compute_tokens": 0,
       "exact_equality": true,
       "failure_point": "before-forward",
-      "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
-      "ordinary_completion_seconds": 1.108851,
-      "recovery_duration_seconds": 1.878787,
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.206218,
+      "recovery_duration_seconds": 2.813724,
       "replayed_steps": 2,
       "replayed_tokens": 128,
       "report_path": "scenarios/before-forward/recovery-report.json"
     },
     {
-      "checkpoint_selection_load_seconds": 0.031754,
+      "checkpoint_selection_load_seconds": 0.034986,
       "completed_restarts": 2,
       "discarded_compute_tokens": 128,
       "exact_equality": true,
       "failure_point": "after-backward",
-      "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
-      "ordinary_completion_seconds": 1.035399,
-      "recovery_duration_seconds": 1.82463,
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.179112,
+      "recovery_duration_seconds": 3.663566,
       "replayed_steps": 2,
       "replayed_tokens": 128,
       "report_path": "scenarios/after-backward/recovery-report.json"
     },
     {
-      "checkpoint_selection_load_seconds": 0.040544,
+      "checkpoint_selection_load_seconds": 0.043742,
       "completed_restarts": 2,
       "discarded_compute_tokens": 128,
       "exact_equality": true,
       "failure_point": "after-optimizer",
-      "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
-      "ordinary_completion_seconds": 1.221283,
-      "recovery_duration_seconds": 2.063736,
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.204289,
+      "recovery_duration_seconds": 3.084902,
       "replayed_steps": 2,
       "replayed_tokens": 128,
       "report_path": "scenarios/after-optimizer/recovery-report.json"
     },
     {
-      "checkpoint_selection_load_seconds": 0.036379,
+      "checkpoint_selection_load_seconds": 0.035134,
       "completed_restarts": 2,
       "discarded_compute_tokens": 128,
       "exact_equality": true,
       "failure_point": "during-checkpoint-write",
-      "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
-      "ordinary_completion_seconds": 0.890599,
-      "recovery_duration_seconds": 2.245327,
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.459471,
+      "recovery_duration_seconds": 3.062532,
       "replayed_steps": 2,
       "replayed_tokens": 128,
       "report_path": "scenarios/during-checkpoint-write/recovery-report.json"
     }
   ],
   "schema": "RecoveryMatrixV1",
-  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3"
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "unique_documents_sampled": 12
 }

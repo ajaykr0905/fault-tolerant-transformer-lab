@@ -49,7 +49,7 @@ trained to useful quality.
 Every scenario produced final state digest:
 
 ```text
-62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc
+59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386
 ```
 
 The exact checks cover batch/window sequence, loss sequence, model tensors, optimizer tensors, RNG

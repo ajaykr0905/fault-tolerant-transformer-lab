@@ -3,50 +3,51 @@
     {
       "attempted_step": 2,
       "attempted_tokens": 64,
-      "batch_id": "3da6fb7b67db3ec3a853bf6c6ebb3b7caf218710586b43606990754f4f283351",
-      "checkpoint_load_seconds": 0.014445,
+      "batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+      "checkpoint_load_seconds": 0.016975,
       "committed_step": 1,
       "discarded_compute_tokens": 64,
       "failure_point": "during-checkpoint-write",
       "replayed_sample_ids": [
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000064",
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000096"
+        "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+        "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
       ],
       "replayed_tokens": 64,
-      "restart_to_replayed_commit_seconds": 1.170476,
+      "restart_to_replayed_commit_seconds": 1.410105,
       "sample_ids": [
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000064",
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000096"
+        "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+        "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
       ],
       "selected_generation": 1
     },
     {
       "attempted_step": 3,
       "attempted_tokens": 64,
-      "batch_id": "ec462ba9aee745ea3a78dc308625ed8a46a74805c0e8ca0e9e227f7b906a7a44",
-      "checkpoint_load_seconds": 0.021934,
+      "batch_id": "140d02fe0712f4521765f56df50a36443c7b92367b4e333b312c12f39b02367c",
+      "checkpoint_load_seconds": 0.018159,
       "committed_step": 2,
       "discarded_compute_tokens": 64,
       "failure_point": "during-checkpoint-write",
       "replayed_sample_ids": [
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000128",
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000160"
+        "017ded8c419ba7853fed6e2475ae7f6aca9b50c36148e554ecbd7e9f796b2597:000000000000",
+        "01af394ef7f18c9c95045bb3215b1dd0d56dcb8efebe0d2a77a4459225226a2e:000000000000"
       ],
       "replayed_tokens": 64,
-      "restart_to_replayed_commit_seconds": 1.074851,
+      "restart_to_replayed_commit_seconds": 1.652427,
       "sample_ids": [
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000128",
-        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000160"
+        "017ded8c419ba7853fed6e2475ae7f6aca9b50c36148e554ecbd7e9f796b2597:000000000000",
+        "01af394ef7f18c9c95045bb3215b1dd0d56dcb8efebe0d2a77a4459225226a2e:000000000000"
       ],
       "selected_generation": 2
     }
   ],
-  "checkpoint_selection_load_seconds": 0.036379,
-  "code_fingerprint": "6685af36d731272a6725a2dd036befbebf7352601eebbd213afe331ec0f69cc5",
-  "code_revision": "3680e42bec73e9f352712318a1e30743ed3d8d58",
+  "checkpoint_selection_load_seconds": 0.035134,
+  "code_fingerprint": "045ed43be9b980ab49b57fd79b4c0319cf8372be3547d4ab3f794a013f606c49",
+  "code_revision": "8477b8252c2cfbba584acd1024af65d1aef235a6",
   "completed_restarts": 2,
+  "completed_steps": 6,
   "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
-  "control_run_fingerprint": "86d1a0cfa5196a72b264e6444b9a1c3d4c7b2a357b7247c9d8f5953029554ced",
+  "control_run_fingerprint": "a554641cd9311e19a9aa4622565c27b02d11d445fcaec8718d925650c00b51ea",
   "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
   "discarded_compute_tokens": 128,
   "durable_committed_steps_lost": 0,
@@ -68,7 +69,7 @@
   },
   "exact_equality": true,
   "failure_point": "during-checkpoint-write",
-  "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
+  "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
   "hardware": {
     "device": "cpu",
     "machine": "arm64",
@@ -84,18 +85,21 @@
     "Checkpoint hashes detect corruption but do not authenticate attacker-controlled artifacts."
   ],
   "max_recovery_point_lag_steps": 1,
-  "ordinary_completion_seconds": 0.890599,
-  "recovered_run_fingerprint": "86d1a0cfa5196a72b264e6444b9a1c3d4c7b2a357b7247c9d8f5953029554ced",
-  "recovery_duration_seconds": 2.245327,
+  "ordinary_completion_seconds": 1.459471,
+  "recovered_run_fingerprint": "a554641cd9311e19a9aa4622565c27b02d11d445fcaec8718d925650c00b51ea",
+  "recovery_duration_seconds": 3.062532,
   "replayed_steps": 2,
   "replayed_tokens": 128,
   "requested_restarts": 2,
-  "run_contract_fingerprint": "6cd63180266337f1fb973ca6b12f699b79a13fdd94d1f99297a521d7c5612ad0",
+  "run_contract_fingerprint": "9ab8d151c9bbf504d387db8b4020c23cd050b425ffdef0fa03ec46238f8601e3",
+  "sample_windows": 12,
   "schema": "RecoveryReportV1",
   "selected_generations": [
     1,
     2,
     3
   ],
-  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3"
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "unique_documents_sampled": 12
 }
