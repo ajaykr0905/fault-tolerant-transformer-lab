@@ -15,4 +15,16 @@ artifacts/cpu-smoke/*
 !artifacts/tuning-comparison/
 artifacts/tuning-comparison/*
 !artifacts/tuning-comparison/result.json
+!artifacts/peps-recovery-v0.2/
+artifacts/peps-recovery-v0.2/*
+!artifacts/peps-recovery-v0.2/matrix.json
+!artifacts/peps-recovery-v0.2/dataset-manifest.json
+!artifacts/peps-recovery-v0.2/scenarios/
+artifacts/peps-recovery-v0.2/scenarios/*
+!artifacts/peps-recovery-v0.2/scenarios/before-forward/
+!artifacts/peps-recovery-v0.2/scenarios/after-backward/
+!artifacts/peps-recovery-v0.2/scenarios/after-optimizer/
+!artifacts/peps-recovery-v0.2/scenarios/during-checkpoint-write/
+artifacts/peps-recovery-v0.2/scenarios/*/*
+!artifacts/peps-recovery-v0.2/scenarios/*/recovery-report.json
 .DS_Store
