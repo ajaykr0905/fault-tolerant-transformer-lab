@@ -1,0 +1,101 @@
+{
+  "attempts": [
+    {
+      "attempted_step": 2,
+      "attempted_tokens": 64,
+      "batch_id": "3da6fb7b67db3ec3a853bf6c6ebb3b7caf218710586b43606990754f4f283351",
+      "checkpoint_load_seconds": 0.01824,
+      "committed_step": 1,
+      "discarded_compute_tokens": 0,
+      "failure_point": "before-forward",
+      "replayed_sample_ids": [
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000064",
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000096"
+      ],
+      "replayed_tokens": 64,
+      "restart_to_replayed_commit_seconds": 0.865123,
+      "sample_ids": [
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000064",
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000096"
+      ],
+      "selected_generation": 1
+    },
+    {
+      "attempted_step": 3,
+      "attempted_tokens": 64,
+      "batch_id": "ec462ba9aee745ea3a78dc308625ed8a46a74805c0e8ca0e9e227f7b906a7a44",
+      "checkpoint_load_seconds": 0.013662,
+      "committed_step": 2,
+      "discarded_compute_tokens": 0,
+      "failure_point": "before-forward",
+      "replayed_sample_ids": [
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000128",
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000160"
+      ],
+      "replayed_tokens": 64,
+      "restart_to_replayed_commit_seconds": 1.013664,
+      "sample_ids": [
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000128",
+        "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000160"
+      ],
+      "selected_generation": 2
+    }
+  ],
+  "checkpoint_selection_load_seconds": 0.031902,
+  "code_fingerprint": "6685af36d731272a6725a2dd036befbebf7352601eebbd213afe331ec0f69cc5",
+  "code_revision": "3680e42bec73e9f352712318a1e30743ed3d8d58",
+  "completed_restarts": 2,
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "control_run_fingerprint": "86d1a0cfa5196a72b264e6444b9a1c3d4c7b2a357b7247c9d8f5953029554ced",
+  "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "discarded_compute_tokens": 0,
+  "durable_committed_steps_lost": 0,
+  "durable_committed_tokens_lost": 0,
+  "equality": {
+    "batch_id_sequence": true,
+    "completed_steps": true,
+    "cursor": true,
+    "final_logits": true,
+    "final_state_digest": true,
+    "loss_sequence": true,
+    "model_tensors": true,
+    "optimizer_tensors": true,
+    "returned_model_tensors": true,
+    "rng_state": true,
+    "run_fingerprint": true,
+    "sample_id_sequence": true,
+    "token_count": true
+  },
+  "exact_equality": true,
+  "failure_point": "before-forward",
+  "final_state_digest": "62c3ec4ed4687a3b82ad093d3044a0a9a49dc620843571f4dc65070625b66cfc",
+  "hardware": {
+    "device": "cpu",
+    "machine": "arm64",
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "python": "3.12.14",
+    "pytorch": "2.13.0",
+    "torch_threads": 5
+  },
+  "limitations": [
+    "This report proves deterministic CPU recovery for this pinned run only.",
+    "It does not measure model quality, GPU behavior, distributed scale, or production readiness.",
+    "Recovery duration is local wall-clock evidence and is not a service-level objective.",
+    "Checkpoint hashes detect corruption but do not authenticate attacker-controlled artifacts."
+  ],
+  "max_recovery_point_lag_steps": 1,
+  "ordinary_completion_seconds": 1.108851,
+  "recovered_run_fingerprint": "86d1a0cfa5196a72b264e6444b9a1c3d4c7b2a357b7247c9d8f5953029554ced",
+  "recovery_duration_seconds": 1.878787,
+  "replayed_steps": 2,
+  "replayed_tokens": 128,
+  "requested_restarts": 2,
+  "run_contract_fingerprint": "6cd63180266337f1fb973ca6b12f699b79a13fdd94d1f99297a521d7c5612ad0",
+  "schema": "RecoveryReportV1",
+  "selected_generations": [
+    1,
+    2,
+    3
+  ],
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3"
+}
