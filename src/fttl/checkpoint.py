@@ -46,6 +46,7 @@ _REQUIRED_STATE_KEYS = frozenset(
         "losses",
         "cursor",
         "batch_ids",
+        "sample_ids",
         "rng_state",
     }
 )
@@ -403,6 +404,7 @@ def save_checkpoint(
     losses: list[float],
     cursor: Mapping[str, Any] | Any | None = None,
     batch_ids: list[str] | tuple[str, ...] | None = None,
+    sample_ids: list[list[str]] | tuple[tuple[str, ...], ...] | None = None,
     data_fingerprint: str = DEFAULT_DATA_FINGERPRINT,
     tokenizer_fingerprint: str = DEFAULT_TOKENIZER_FINGERPRINT,
     failure_injector: FailureInjector | None = None,
@@ -439,6 +441,10 @@ def save_checkpoint(
 
     cursor_value = None if cursor is None else _json_compatible(cursor)
     batch_id_values = [str(value) for value in (batch_ids or [])]
+    sample_id_values = [
+        [str(sample_id) for sample_id in batch]
+        for batch in (sample_ids or [])
+    ]
     payload: dict[str, Any] = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "config": config.to_dict(),
@@ -452,6 +458,7 @@ def save_checkpoint(
         "losses": [float(loss) for loss in losses],
         "cursor": cursor_value,
         "batch_ids": batch_id_values,
+        "sample_ids": sample_id_values,
         "rng_state": capture_rng_state(),
     }
     state_path = temporary_dir / STATE_FILENAME
@@ -550,6 +557,7 @@ def load_checkpoint(
             expected_data_fingerprint=expected_data_fingerprint,
             expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
         )
+        payload["selected_generation"] = 0
     else:
         if (source / MANIFEST_FILENAME).is_file():
             candidates = [
@@ -566,12 +574,13 @@ def load_checkpoint(
         payload = None
         for generation_dir in candidates:
             try:
-                payload, _ = _load_generation_payload(
+                payload, selected_manifest = _load_generation_payload(
                     generation_dir,
                     expected_config_fingerprint=expected_config.fingerprint(),
                     expected_data_fingerprint=expected_data_fingerprint,
                     expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
                 )
+                payload["selected_generation"] = selected_manifest.generation
                 break
             except CheckpointIntegrityError as error:
                 integrity_errors.append(error)

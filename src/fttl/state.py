@@ -55,7 +55,7 @@ def _update_digest(hasher: Any, value: Any) -> None:
         hasher.update(b"\0")
         hasher.update(json.dumps(list(tensor.shape), separators=(",", ":")).encode("ascii"))
         hasher.update(b"\0")
-        hasher.update(tensor.view(torch.uint8).numpy().tobytes())
+        hasher.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes())
         return
     if isinstance(value, Mapping):
         hasher.update(b"mapping{")

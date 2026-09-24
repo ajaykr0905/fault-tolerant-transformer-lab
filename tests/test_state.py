@@ -30,3 +30,8 @@ def test_state_digest_is_stable_and_sensitive_to_tensor_bytes():
     assert state_digest(first) != state_digest(changed)
     assert state_trees_equal(first, reordered)
     assert not state_trees_equal(first, changed)
+
+
+def test_state_digest_supports_scalar_optimizer_tensors():
+    assert state_digest(torch.tensor(2.0)) == state_digest(torch.tensor(2.0))
+    assert state_digest(torch.tensor(2.0)) != state_digest(torch.tensor(3.0))
