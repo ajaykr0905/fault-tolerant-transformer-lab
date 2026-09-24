@@ -3,11 +3,55 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import subprocess
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+
+
+@lru_cache(maxsize=1)
+def code_fingerprint() -> str:
+    """Hash the installed Python implementation used by the run."""
+
+    package_dir = Path(__file__).resolve().parent
+    hasher = hashlib.sha256()
+    for path in sorted(package_dir.glob("*.py"), key=lambda item: item.name):
+        hasher.update(path.name.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(path.read_bytes())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+@lru_cache(maxsize=1)
+def git_revision() -> str:
+    """Return a public-safe source revision, marking tracked local edits."""
+
+    repository = Path(__file__).resolve().parents[2]
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return f"{revision}-dirty" if dirty else revision
 
 
 def _tuple_tree(value: Any) -> Any:

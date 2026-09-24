@@ -20,12 +20,16 @@ from fttl.train import FailurePoint, InjectedTrainingFailure, TrainingResult, ru
 class FailureAttemptV1:
     failure_point: str
     attempted_step: int
-    durable_step: int
+    committed_step: int
     batch_id: str
     sample_ids: tuple[str, ...]
     replayed_sample_ids: tuple[str, ...]
     attempted_tokens: int
+    replayed_tokens: int
+    discarded_compute_tokens: int
     selected_generation: int | None
+    checkpoint_load_seconds: float
+    restart_to_replayed_commit_seconds: float
 
 
 @dataclass(frozen=True)
@@ -36,15 +40,26 @@ class RecoveryReportV1:
     completed_restarts: int
     attempts: tuple[FailureAttemptV1, ...]
     selected_generations: tuple[int, ...]
-    rpo_lost_steps: int
-    rpo_lost_tokens: int
+    max_recovery_point_lag_steps: int
+    durable_committed_steps_lost: int
+    durable_committed_tokens_lost: int
+    replayed_steps: int
+    replayed_tokens: int
+    discarded_compute_tokens: int
+    checkpoint_selection_load_seconds: float
     recovery_duration_seconds: float
+    ordinary_completion_seconds: float
     config_fingerprint: str
     dataset_fingerprint: str
     tokenizer_fingerprint: str
+    run_contract_fingerprint: str
+    code_fingerprint: str
+    code_revision: str
     equality: dict[str, bool]
     exact_equality: bool
     final_state_digest: str
+    control_run_fingerprint: str
+    recovered_run_fingerprint: str
     hardware: dict[str, object]
     limitations: tuple[str, ...]
 
@@ -66,16 +81,18 @@ def _write_report(path: Path, report: RecoveryReportV1) -> None:
 def _checkpoint_state(
     config: ExperimentConfig,
     result: TrainingResult,
+    run_dir: Path,
 ) -> tuple[dict[str, torch.Tensor], dict[str, object]]:
     model = TinyTransformer(config.model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     load_checkpoint(
-        Path(result.checkpoint),
+        run_dir / result.checkpoint,
         model=model,
         optimizer=optimizer,
         expected_config=config,
         expected_data_fingerprint=result.data_fingerprint,
         expected_tokenizer_fingerprint=result.tokenizer_fingerprint,
+        expected_run_contract_fingerprint=result.run_contract_fingerprint,
         restore_rng=False,
     )
     return model.state_dict(), optimizer.state_dict()
@@ -132,7 +149,8 @@ def verify_recovery(
                 stop_after_step=target_step,
                 dataset_manifest=dataset_manifest,
             )
-            recovery_seconds += time.perf_counter() - started
+            restart_to_commit_seconds = time.perf_counter() - started
+            recovery_seconds += restart_to_commit_seconds
             replayed = recovered.sample_ids[target_step - 1]
             if replayed != failure.sample_ids:
                 raise RecoveryVerificationError(
@@ -145,32 +163,46 @@ def verify_recovery(
                 FailureAttemptV1(
                     failure_point=failure.point,
                     attempted_step=failure.attempted_step,
-                    durable_step=failure.durable_step,
+                    committed_step=failure.durable_step,
                     batch_id=failure.batch_id,
                     sample_ids=failure.sample_ids,
                     replayed_sample_ids=replayed,
                     attempted_tokens=failure.attempted_tokens,
+                    replayed_tokens=failure.attempted_tokens,
+                    discarded_compute_tokens=(
+                        0
+                        if failure.point == "before-forward"
+                        else failure.attempted_tokens
+                    ),
                     selected_generation=selected,
+                    checkpoint_load_seconds=recovered.checkpoint_load_seconds,
+                    restart_to_replayed_commit_seconds=round(
+                        restart_to_commit_seconds, 6
+                    ),
                 )
             )
-            resume_from = Path(recovered.checkpoint)
+            resume_from = recovered_dir / recovered.checkpoint
         else:
             raise RecoveryVerificationError("configured failure point was not reached")
 
     assert recovered is not None
-    started = time.perf_counter()
+    completion_started = time.perf_counter()
     recovered_model, recovered = run_training(
         config,
         recovered_dir,
-        resume_from=Path(recovered.checkpoint),
+        resume_from=recovered_dir / recovered.checkpoint,
         dataset_manifest=dataset_manifest,
     )
-    recovery_seconds += time.perf_counter() - started
+    ordinary_completion_seconds = time.perf_counter() - completion_started
     if recovered.recovered_from_generation is not None:
         selected_generations.append(recovered.recovered_from_generation)
 
-    control_model_state, control_optimizer_state = _checkpoint_state(config, control)
-    recovered_model_state, recovered_optimizer_state = _checkpoint_state(config, recovered)
+    control_model_state, control_optimizer_state = _checkpoint_state(
+        config, control, control_dir
+    )
+    recovered_model_state, recovered_optimizer_state = _checkpoint_state(
+        config, recovered, recovered_dir
+    )
     equality = {
         "batch_id_sequence": control.batch_ids == recovered.batch_ids,
         "sample_id_sequence": control.sample_ids == recovered.sample_ids,
@@ -185,6 +217,7 @@ def verify_recovery(
         "token_count": control.tokens_seen == recovered.tokens_seen,
         "final_logits": control.final_logits_digest == recovered.final_logits_digest,
         "final_state_digest": control.final_state_digest == recovered.final_state_digest,
+        "run_fingerprint": control.run_fingerprint == recovered.run_fingerprint,
     }
     # Also compare the returned final model, independently of checkpoint reload.
     equality["returned_model_tensors"] = state_trees_equal(
@@ -197,17 +230,32 @@ def verify_recovery(
         completed_restarts=len(attempts),
         attempts=tuple(attempts),
         selected_generations=tuple(selected_generations),
-        rpo_lost_steps=sum(
-            attempt.attempted_step - attempt.durable_step for attempt in attempts
+        max_recovery_point_lag_steps=max(
+            attempt.attempted_step - attempt.committed_step for attempt in attempts
         ),
-        rpo_lost_tokens=sum(attempt.attempted_tokens for attempt in attempts),
+        durable_committed_steps_lost=0,
+        durable_committed_tokens_lost=0,
+        replayed_steps=len(attempts),
+        replayed_tokens=sum(attempt.replayed_tokens for attempt in attempts),
+        discarded_compute_tokens=sum(
+            attempt.discarded_compute_tokens for attempt in attempts
+        ),
+        checkpoint_selection_load_seconds=round(
+            sum(attempt.checkpoint_load_seconds for attempt in attempts), 6
+        ),
         recovery_duration_seconds=round(recovery_seconds, 6),
+        ordinary_completion_seconds=round(ordinary_completion_seconds, 6),
         config_fingerprint=config.fingerprint(),
         dataset_fingerprint=control.data_fingerprint,
         tokenizer_fingerprint=control.tokenizer_fingerprint,
+        run_contract_fingerprint=control.run_contract_fingerprint,
+        code_fingerprint=control.code_fingerprint,
+        code_revision=control.code_revision,
         equality=equality,
         exact_equality=all(equality.values()),
         final_state_digest=recovered.final_state_digest,
+        control_run_fingerprint=control.run_fingerprint,
+        recovered_run_fingerprint=recovered.run_fingerprint,
         hardware={
             "device": "cpu",
             "machine": platform.machine(),

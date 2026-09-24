@@ -27,7 +27,7 @@ def test_checkpoint_restart_matches_uninterrupted_training(tmp_path: Path):
     resumed, resumed_result = run_training(
         config,
         tmp_path / "restart",
-        resume_from=Path(interrupted_result.checkpoint),
+        resume_from=tmp_path / "restart" / interrupted_result.checkpoint,
     )
 
     assert direct_result.steps == resumed_result.steps == 4
@@ -51,7 +51,7 @@ def test_checkpoint_rejects_configuration_drift(tmp_path: Path):
     optimizer = torch.optim.AdamW(model.parameters(), lr=changed.learning_rate)
     with pytest.raises(CheckpointMismatchError, match="does not match"):
         load_checkpoint(
-            Path(result.checkpoint),
+            tmp_path / "run" / result.checkpoint,
             model=model,
             optimizer=optimizer,
             expected_config=changed,
@@ -66,7 +66,7 @@ def test_resume_rejects_a_boundary_at_or_behind_the_checkpoint(tmp_path: Path):
         run_training(
             config,
             tmp_path / "run",
-            resume_from=Path(result.checkpoint),
+            resume_from=tmp_path / "run" / result.checkpoint,
             stop_after_step=1,
         )
 
@@ -74,7 +74,7 @@ def test_resume_rejects_a_boundary_at_or_behind_the_checkpoint(tmp_path: Path):
         run_training(
             config,
             tmp_path / "run",
-            resume_from=Path(result.checkpoint),
+            resume_from=tmp_path / "run" / result.checkpoint,
             stop_after_step=2,
         )
 
@@ -82,3 +82,45 @@ def test_resume_rejects_a_boundary_at_or_behind_the_checkpoint(tmp_path: Path):
 def test_training_rejects_non_positive_stop_boundary(tmp_path: Path):
     with pytest.raises(ValueError, match="at least 1"):
         run_training(tiny_config(), tmp_path / "run", stop_after_step=0)
+
+
+def test_trusted_legacy_synthetic_checkpoint_has_an_explicit_v2_migration_path(
+    tmp_path: Path,
+):
+    config = tiny_config()
+    control, control_result = run_training(config, tmp_path / "control")
+    _, partial = run_training(config, tmp_path / "partial", stop_after_step=2)
+    model = TinyTransformer(config.model)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    payload = load_checkpoint(
+        tmp_path / "partial" / partial.checkpoint,
+        model=model,
+        optimizer=optimizer,
+        expected_config=config,
+    )
+    legacy = tmp_path / "trusted-legacy.pt"
+    torch.save(
+        {
+            "schema_version": 1,
+            "config": config.to_dict(),
+            "config_fingerprint": config.fingerprint(),
+            "model": payload["model"],
+            "optimizer": payload["optimizer"],
+            "step": payload["step"],
+            "tokens_seen": payload["tokens_seen"],
+            "losses": payload["losses"],
+            "torch_rng_state": payload["rng_state"]["torch_cpu"],
+        },
+        legacy,
+    )
+
+    resumed, resumed_result = run_training(
+        config,
+        tmp_path / "legacy-resume",
+        resume_from=legacy,
+    )
+
+    assert resumed_result.batch_ids == control_result.batch_ids
+    assert resumed_result.sample_ids == control_result.sample_ids
+    for name, value in control.state_dict().items():
+        torch.testing.assert_close(value, resumed.state_dict()[name], rtol=0, atol=0)

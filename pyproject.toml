@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fault-tolerant-transformer-lab"
-version = "0.1.0"
+version = "0.2.0"
 description = "A reproducible small-transformer lab for checkpoint recovery and controlled experiments."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ fttl-train-smoke = "fttl.cli:main"
 fttl-compare-tuning = "fttl.ablation_cli:main"
 fttl-prepare-peps = "fttl.prepare_peps_cli:main"
 fttl-verify-recovery = "fttl.recovery_cli:main"
+fttl-recovery-matrix = "fttl.matrix_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -41,6 +41,22 @@ def test_training_cursor_round_trip_preserves_next_batch_identity():
     assert source.batch(restored).sample_ids == cursor.next_sample_ids
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"batch_index": 1.0},
+        {"epoch": False},
+        {"next_sample_ids": "sample"},
+        {"unexpected": "field"},
+    ],
+)
+def test_training_cursor_rejects_coercion_and_unknown_fields(change):
+    value = SyntheticBatchSource(config(vocab_size=24)).initial_cursor().to_dict()
+    value.update(change)
+    with pytest.raises(ValueError, match="cursor"):
+        TrainingCursorV1.from_dict(value)
+
+
 def test_synthetic_cursor_rejects_silent_advancement():
     source = SyntheticBatchSource(config(vocab_size=24))
     cursor = source.initial_cursor()
@@ -69,8 +85,10 @@ def test_document_windows_are_stable_and_do_not_cross_documents():
     assert first.next_cursor.batch_index == 1
     assert first.next_cursor.next_sample_ids == (
         "pep-alpha:000000000008",
-        "pep-beta:000000000000",
+        "pep-alpha:000000000011",
     )
+    second = source.batch(first.next_cursor)
+    assert second.targets[1, -1].item() == 256
 
 
 def test_utf8_dataset_requires_byte_token_vocabulary():
@@ -81,3 +99,16 @@ def test_utf8_dataset_requires_byte_token_vocabulary():
             data_fingerprint="d" * 64,
             tokenizer_fingerprint="t" * 64,
         )
+
+
+def test_batch_identity_changes_when_the_same_windows_repeat_in_a_later_epoch():
+    source = PreparedDatasetBatchSource(
+        config(),
+        [Document("only", "abcdefgh")],
+        data_fingerprint="d" * 64,
+        tokenizer_fingerprint="t" * 64,
+    )
+    first = source.batch(source.cursor_at(0))
+    repeated = source.batch(source.cursor_at(1))
+    assert first.sample_ids == repeated.sample_ids
+    assert first.batch_id != repeated.batch_id

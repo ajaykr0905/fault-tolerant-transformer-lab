@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,7 @@ def load(
     *,
     data_fingerprint: str = "dataset-a",
     tokenizer_fingerprint: str = "utf8-byte-v1",
+    run_contract_fingerprint: str | None = None,
 ):
     model, optimizer = model_and_optimizer(config)
     payload = load_checkpoint(
@@ -85,6 +87,7 @@ def load(
         expected_config=config,
         expected_data_fingerprint=data_fingerprint,
         expected_tokenizer_fingerprint=tokenizer_fingerprint,
+        expected_run_contract_fingerprint=run_contract_fingerprint,
     )
     return model, payload
 
@@ -132,6 +135,7 @@ def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
         ("config", "configuration does not match"),
         ("data", "data fingerprint does not match"),
         ("tokenizer", "tokenizer fingerprint does not match"),
+        ("run", "run contract fingerprint does not match"),
     ],
 )
 def test_valid_checkpoint_rejects_contract_drift(
@@ -143,6 +147,7 @@ def test_valid_checkpoint_rejects_contract_drift(
     expected_config = config
     data = "dataset-a"
     tokenizer = "utf8-byte-v1"
+    run_contract = None
     if change == "config":
         expected_config = ExperimentConfig(
             model=config.model,
@@ -154,8 +159,10 @@ def test_valid_checkpoint_rejects_contract_drift(
         )
     elif change == "data":
         data = "dataset-b"
-    else:
+    elif change == "tokenizer":
         tokenizer = "utf8-byte-v2"
+    else:
+        run_contract = "different-run-contract"
 
     with pytest.raises(CheckpointMismatchError, match=message):
         load(
@@ -163,6 +170,7 @@ def test_valid_checkpoint_rejects_contract_drift(
             expected_config,
             data_fingerprint=data,
             tokenizer_fingerprint=tokenizer,
+            run_contract_fingerprint=run_contract,
         )
 
 
@@ -249,6 +257,42 @@ def test_store_without_latest_never_loads_a_published_but_uncommitted_generation
         load(store, config)
 
 
+def test_save_fails_closed_when_latest_pointer_is_malformed(tmp_path: Path):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    (store / "LATEST").write_text("not-a-generation\n", encoding="utf-8")
+
+    with pytest.raises(CheckpointIntegrityError, match="LATEST pointer is malformed"):
+        publish(store, config, step=2, marker=0.75)
+
+    assert (store / "generation-00000001").is_dir()
+
+
+def test_save_rejects_mixing_training_contracts_in_one_store(tmp_path: Path):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    model, optimizer = model_and_optimizer(config)
+
+    with pytest.raises(CheckpointMismatchError, match="data fingerprint"):
+        save_checkpoint(
+            store,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            step=2,
+            tokens_seen=24,
+            losses=[2.0, 1.0],
+            data_fingerprint="dataset-b",
+            tokenizer_fingerprint="utf8-byte-v1",
+        )
+
+    assert sorted(path.name for path in store.glob("generation-*")) == [
+        "generation-00000001"
+    ]
+
+
 def test_temp_write_crash_never_replaces_valid_generation(tmp_path: Path):
     config = checkpoint_config()
     store = tmp_path / "checkpoints"
@@ -304,3 +348,36 @@ def test_checkpoint_deserialization_is_weights_only(
     _, payload = load(store, config)
     assert payload["step"] == 1
     assert observed == [True]
+
+
+def test_serialized_config_is_checked_even_when_fingerprints_are_unchanged(
+    tmp_path: Path,
+):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    generation = store / "generation-00000001"
+    state_path = generation / "state.pt"
+    payload = torch.load(state_path, map_location="cpu", weights_only=True)
+    payload["config"]["seed"] += 1
+    torch.save(payload, state_path)
+    manifest_path = generation / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["state_bytes"] = state_path.stat().st_size
+    manifest["state_sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CheckpointMismatchError, match="serialized configuration"):
+        load(store, config)
+
+
+def test_next_save_cleans_stale_latest_temporary_file(tmp_path: Path):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    stale = store / ".LATEST.tmp-abandoned"
+    stale.write_text("generation-99999999\n", encoding="utf-8")
+
+    publish(store, config, step=2, marker=0.5)
+
+    assert not stale.exists()

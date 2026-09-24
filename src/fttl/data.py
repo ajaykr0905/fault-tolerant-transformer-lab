@@ -38,14 +38,43 @@ class TrainingCursorV1:
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> "TrainingCursorV1":
+        required = {
+            "schema_version",
+            "epoch",
+            "document_id",
+            "token_window_offset",
+            "batch_id",
+            "next_sample_ids",
+            "batch_index",
+        }
+        if set(value) != required:
+            raise ValueError("training cursor fields do not match TrainingCursorV1")
+        integer_fields = ("schema_version", "epoch", "token_window_offset", "batch_index")
+        if any(
+            isinstance(value[field], bool) or not isinstance(value[field], int)
+            for field in integer_fields
+        ):
+            raise ValueError("training cursor counters must be integers")
+        if any(
+            not isinstance(value[field], str) or not value[field]
+            for field in ("document_id", "batch_id")
+        ):
+            raise ValueError("training cursor identity fields must be strings")
+        raw_sample_ids = value["next_sample_ids"]
+        if (
+            not isinstance(raw_sample_ids, list)
+            or not raw_sample_ids
+            or not all(isinstance(item, str) and item for item in raw_sample_ids)
+        ):
+            raise ValueError("training cursor sample IDs must be a non-empty string list")
         return cls(
-            schema_version=int(value["schema_version"]),
-            epoch=int(value["epoch"]),
-            document_id=str(value["document_id"]),
-            token_window_offset=int(value["token_window_offset"]),
-            batch_id=str(value["batch_id"]),
-            next_sample_ids=tuple(str(item) for item in value["next_sample_ids"]),  # type: ignore[arg-type]
-            batch_index=int(value["batch_index"]),
+            schema_version=value["schema_version"],
+            epoch=value["epoch"],
+            document_id=value["document_id"],
+            token_window_offset=value["token_window_offset"],
+            batch_id=value["batch_id"],
+            next_sample_ids=tuple(raw_sample_ids),
+            batch_index=value["batch_index"],
         )
 
 
@@ -93,7 +122,9 @@ class SyntheticBatchSource:
             f"synthetic:{batch_index:08d}:{index:04d}"
             for index in range(self.config.batch_size)
         )
-        batch_id = hashlib.sha256("\n".join(sample_ids).encode("utf-8")).hexdigest()
+        batch_id = hashlib.sha256(
+            f"{batch_index}\n".encode("utf-8") + "\n".join(sample_ids).encode("utf-8")
+        ).hexdigest()
         return TrainingCursorV1(
             schema_version=1,
             epoch=0,
@@ -165,7 +196,13 @@ class PreparedDatasetBatchSource:
         windows: list[_TokenWindow] = []
         for document in sorted(documents, key=lambda item: item.document_id):
             encoded = tuple(document.text.encode("utf-8")) + (256,)
-            for offset in range(0, len(encoded) - width + 1, config.model.block_size):
+            if len(encoded) < width:
+                continue
+            offsets = list(range(0, len(encoded) - width + 1, config.model.block_size))
+            final_offset = len(encoded) - width
+            if offsets[-1] != final_offset:
+                offsets.append(final_offset)
+            for offset in offsets:
                 windows.append(
                     _TokenWindow(
                         document_id=document.document_id,
@@ -207,7 +244,9 @@ class PreparedDatasetBatchSource:
         indices = self._window_indices(batch_index)
         selected = tuple(self._windows[index] for index in indices)
         sample_ids = tuple(window.sample_id for window in selected)
-        batch_id = hashlib.sha256("\n".join(sample_ids).encode("utf-8")).hexdigest()
+        batch_id = hashlib.sha256(
+            f"{batch_index}\n".encode("utf-8") + "\n".join(sample_ids).encode("utf-8")
+        ).hexdigest()
         absolute_start = batch_index * self.config.batch_size
         first = selected[0]
         return TrainingCursorV1(

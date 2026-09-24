@@ -6,6 +6,7 @@ import pytest
 
 from fttl.config import ExperimentConfig, ModelConfig
 from fttl.dataset import DatasetSource, DatasetValidationError, prepare_peps
+from fttl.matrix import verify_recovery_matrix
 from fttl.recovery import verify_recovery
 from fttl.train import run_training
 
@@ -62,8 +63,12 @@ def test_two_consecutive_restarts_match_uninterrupted_real_data_run(tmp_path: Pa
 
     assert report.exact_equality
     assert report.completed_restarts == 2
-    assert report.rpo_lost_steps == 2
-    assert report.rpo_lost_tokens == 32
+    assert report.max_recovery_point_lag_steps == 1
+    assert report.durable_committed_steps_lost == 0
+    assert report.durable_committed_tokens_lost == 0
+    assert report.replayed_steps == 2
+    assert report.replayed_tokens == 32
+    assert report.discarded_compute_tokens == 32
     assert all(attempt.sample_ids == attempt.replayed_sample_ids for attempt in report.attempts)
     assert all(report.equality.values())
     assert (tmp_path / "evidence" / "recovery-report.json").is_file()
@@ -86,6 +91,8 @@ def test_each_transaction_boundary_replays_the_same_batch(
 
     assert report.exact_equality
     assert report.attempts[0].sample_ids == report.attempts[0].replayed_sample_ids
+    expected_discarded = 0 if failure_point == "before-forward" else 16
+    assert report.discarded_compute_tokens == expected_discarded
 
 
 def test_real_dataset_manifest_and_cursor_are_bound_to_the_checkpoint(tmp_path: Path):
@@ -101,7 +108,7 @@ def test_real_dataset_manifest_and_cursor_are_bound_to_the_checkpoint(tmp_path: 
         config,
         tmp_path / "run",
         dataset_manifest=manifest,
-        resume_from=Path(partial.checkpoint),
+        resume_from=tmp_path / "run" / partial.checkpoint,
     )
 
     assert resumed.steps == 4
@@ -128,5 +135,29 @@ def test_one_changed_dataset_byte_is_rejected_before_resume(tmp_path: Path):
             config,
             tmp_path / "run",
             dataset_manifest=manifest,
-            resume_from=Path(partial.checkpoint),
+            resume_from=tmp_path / "run" / partial.checkpoint,
         )
+
+
+def test_complete_matrix_is_public_safe_and_passes_all_scenarios(tmp_path: Path):
+    output = tmp_path / "matrix"
+    matrix = verify_recovery_matrix(
+        real_data_config(),
+        prepared_fixture(tmp_path / "dataset"),
+        output,
+        restarts=1,
+    )
+
+    assert matrix.all_passed
+    assert {scenario.failure_point for scenario in matrix.scenarios} == {
+        "before-forward",
+        "after-backward",
+        "after-optimizer",
+        "during-checkpoint-write",
+    }
+    assert all(matrix.integrity_checks.values())
+    public_json = "\n".join(
+        path.read_text(encoding="utf-8") for path in output.rglob("*.json")
+    )
+    assert str(tmp_path) not in public_json
+    assert '"checkpoint": "checkpoints"' in public_json

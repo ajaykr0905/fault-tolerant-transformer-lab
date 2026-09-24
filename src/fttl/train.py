@@ -12,6 +12,7 @@ from typing import Literal
 import numpy as np
 import torch
 
+from fttl import __version__
 from fttl.checkpoint import load_checkpoint, save_checkpoint
 from fttl.config import ExperimentConfig
 from fttl.data import (
@@ -21,7 +22,7 @@ from fttl.data import (
     TrainingCursorV1,
 )
 from fttl.model import TinyTransformer
-from fttl.state import capture_rng_state, state_digest
+from fttl.state import capture_rng_state, code_fingerprint, git_revision, state_digest
 
 
 FailurePoint = Literal[
@@ -78,14 +79,19 @@ class TrainingResult:
     checkpoint: str
     checkpoint_generation: int
     recovered_from_generation: int | None
+    checkpoint_load_seconds: float
     config_fingerprint: str
     data_fingerprint: str
     tokenizer_fingerprint: str
+    run_contract_fingerprint: str
+    code_fingerprint: str
+    code_revision: str
     model_digest: str
     optimizer_digest: str
     rng_digest: str
     final_logits_digest: str
     final_state_digest: str
+    run_fingerprint: str
     device: str
     torch_version: str
     python_version: str
@@ -154,6 +160,19 @@ def run_training(
         raise ValueError("failure_step requires failure_point")
 
     source = _batch_source(config, dataset_manifest)
+    implementation_fingerprint = code_fingerprint()
+    run_contract_fingerprint = state_digest(
+        {
+            "schema": "RunContractV1",
+            "package_version": __version__,
+            "command_contract": "fttl-train-smoke-v2",
+            "model_architecture": "TinyTransformer-v1",
+            "config_fingerprint": config.fingerprint(),
+            "data_fingerprint": source.data_fingerprint,
+            "tokenizer_fingerprint": source.tokenizer_fingerprint,
+            "code_fingerprint": implementation_fingerprint,
+        }
+    )
     seed_everything(config.seed)
     model = TinyTransformer(config.model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
@@ -165,16 +184,27 @@ def run_training(
     sample_ids: list[tuple[str, ...]] = []
     cursor = source.initial_cursor()
     recovered_from_generation: int | None = None
+    checkpoint_load_seconds = 0.0
 
     if resume_from is not None:
+        legacy_synthetic = Path(resume_from).is_file() and dataset_manifest is None
+        load_started = time.perf_counter()
         payload = load_checkpoint(
             resume_from,
             model=model,
             optimizer=optimizer,
             expected_config=config,
-            expected_data_fingerprint=source.data_fingerprint,
-            expected_tokenizer_fingerprint=source.tokenizer_fingerprint,
+            expected_data_fingerprint=(
+                None if legacy_synthetic else source.data_fingerprint
+            ),
+            expected_tokenizer_fingerprint=(
+                None if legacy_synthetic else source.tokenizer_fingerprint
+            ),
+            expected_run_contract_fingerprint=(
+                None if legacy_synthetic else run_contract_fingerprint
+            ),
         )
+        checkpoint_load_seconds = round(time.perf_counter() - load_started, 6)
         start_step = durable_step = int(payload["step"])
         tokens_seen = int(payload["tokens_seen"])
         losses = [float(value) for value in payload["losses"]]
@@ -183,6 +213,11 @@ def run_training(
             tuple(str(sample_id) for sample_id in batch)
             for batch in payload.get("sample_ids", [])
         ]
+        if legacy_synthetic and not batch_ids:
+            for batch_index in range(start_step):
+                historical = source.batch(source.cursor_at(batch_index))
+                batch_ids.append(historical.batch_id)
+                sample_ids.append(historical.sample_ids)
         raw_cursor = payload.get("cursor")
         cursor = (
             TrainingCursorV1.from_dict(raw_cursor)
@@ -298,6 +333,7 @@ def run_training(
                 sample_ids=sample_ids,
                 data_fingerprint=source.data_fingerprint,
                 tokenizer_fingerprint=source.tokenizer_fingerprint,
+                run_contract_fingerprint=run_contract_fingerprint,
                 failure_injector=failure_injector,
             )
             checkpoint_generation = manifest.generation
@@ -330,6 +366,16 @@ def run_training(
             "final_logits_digest": final_logits_digest,
         }
     )
+    run_fingerprint = state_digest(
+        {
+            "schema": "RunFingerprintV1",
+            "config_fingerprint": config.fingerprint(),
+            "data_fingerprint": source.data_fingerprint,
+            "tokenizer_fingerprint": source.tokenizer_fingerprint,
+            "run_contract_fingerprint": run_contract_fingerprint,
+            "final_state_digest": final_state_digest,
+        }
+    )
     result = TrainingResult(
         schema_version=2,
         steps=final_step,
@@ -341,17 +387,22 @@ def run_training(
         sample_ids=tuple(sample_ids),
         final_cursor=final_cursor,
         elapsed_seconds=round(time.perf_counter() - started, 6),
-        checkpoint=str(checkpoint_path),
+        checkpoint="checkpoints",
         checkpoint_generation=checkpoint_generation,
         recovered_from_generation=recovered_from_generation,
+        checkpoint_load_seconds=checkpoint_load_seconds,
         config_fingerprint=config.fingerprint(),
         data_fingerprint=source.data_fingerprint,
         tokenizer_fingerprint=source.tokenizer_fingerprint,
+        run_contract_fingerprint=run_contract_fingerprint,
+        code_fingerprint=implementation_fingerprint,
+        code_revision=git_revision(),
         model_digest=model_digest,
         optimizer_digest=optimizer_digest,
         rng_digest=rng_digest,
         final_logits_digest=final_logits_digest,
         final_state_digest=final_state_digest,
+        run_fingerprint=run_fingerprint,
         device="cpu",
         torch_version=torch.__version__,
         python_version=platform.python_version(),
@@ -369,8 +420,15 @@ def run_training(
             "config": config.to_dict(),
             "config_fingerprint": config.fingerprint(),
             "data_fingerprint": source.data_fingerprint,
-            "dataset_manifest": str(dataset_manifest) if dataset_manifest else None,
+            "dataset_manifest": {
+                "provided": dataset_manifest is not None,
+                "fingerprint": source.data_fingerprint,
+            },
             "tokenizer_fingerprint": source.tokenizer_fingerprint,
+            "run_contract_fingerprint": run_contract_fingerprint,
+            "code_fingerprint": implementation_fingerprint,
+            "code_revision": git_revision(),
+            "package_version": __version__,
         },
     )
     return model, result

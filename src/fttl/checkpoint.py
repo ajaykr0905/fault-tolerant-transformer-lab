@@ -28,6 +28,7 @@ from fttl.state import capture_rng_state, restore_rng_state
 CHECKPOINT_SCHEMA_VERSION = 2
 DEFAULT_DATA_FINGERPRINT = "synthetic-token-stream-v1"
 DEFAULT_TOKENIZER_FINGERPRINT = "synthetic-tokenizer-v1"
+DEFAULT_RUN_CONTRACT_FINGERPRINT = "training-contract-v2"
 STATE_FILENAME = "state.pt"
 MANIFEST_FILENAME = "manifest.json"
 LATEST_FILENAME = "LATEST"
@@ -39,6 +40,7 @@ _REQUIRED_STATE_KEYS = frozenset(
         "config_fingerprint",
         "data_fingerprint",
         "tokenizer_fingerprint",
+        "run_contract_fingerprint",
         "model",
         "optimizer",
         "step",
@@ -77,6 +79,7 @@ class CheckpointManifestV2:
     config_fingerprint: str
     data_fingerprint: str
     tokenizer_fingerprint: str
+    run_contract_fingerprint: str
     state_keys: tuple[str, ...]
     cursor: dict[str, Any] | None
 
@@ -104,6 +107,7 @@ class CheckpointManifestV2:
             "config_fingerprint",
             "data_fingerprint",
             "tokenizer_fingerprint",
+            "run_contract_fingerprint",
             "state_keys",
             "cursor",
         }
@@ -134,6 +138,7 @@ class CheckpointManifestV2:
             "config_fingerprint",
             "data_fingerprint",
             "tokenizer_fingerprint",
+            "run_contract_fingerprint",
         )
         if any(not isinstance(value[field], str) for field in string_fields):
             raise CheckpointIntegrityError("checkpoint manifest strings are malformed")
@@ -148,6 +153,7 @@ class CheckpointManifestV2:
             config_fingerprint=value["config_fingerprint"],
             data_fingerprint=value["data_fingerprint"],
             tokenizer_fingerprint=value["tokenizer_fingerprint"],
+            run_contract_fingerprint=value["run_contract_fingerprint"],
             state_keys=tuple(value["state_keys"]),
             cursor=value["cursor"],
         )
@@ -216,6 +222,9 @@ def _cleanup_stale_temporaries(root: Path) -> None:
     for child in root.glob(".generation-*.tmp-*"):
         if child.is_dir():
             shutil.rmtree(child)
+    for child in root.glob(f".{LATEST_FILENAME}.tmp-*"):
+        if child.is_file():
+            child.unlink()
 
 
 def _cleanup_uncommitted_generations(root: Path) -> None:
@@ -225,21 +234,51 @@ def _cleanup_uncommitted_generations(root: Path) -> None:
     could become a future fallback even though it was never committed.
     """
 
+    generations = _generation_directories(root)
     latest_path = root / LATEST_FILENAME
-    latest_number = 0
-    if latest_path.is_file():
-        try:
-            latest_name = latest_path.read_text(encoding="utf-8").strip()
-        except (OSError, UnicodeDecodeError):
-            latest_name = ""
-        match = _GENERATION_PATTERN.fullmatch(latest_name)
-        if match is not None:
-            latest_number = int(match.group(1))
-    for generation_dir in _generation_directories(root):
+    if not latest_path.is_file():
+        if generations:
+            raise CheckpointIntegrityError(
+                "checkpoint generations exist without a valid LATEST pointer; manual repair required"
+            )
+        return
+    try:
+        latest_name = latest_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise CheckpointIntegrityError("checkpoint LATEST pointer is unreadable") from error
+    match = _GENERATION_PATTERN.fullmatch(latest_name)
+    if match is None:
+        raise CheckpointIntegrityError("checkpoint LATEST pointer is malformed")
+    latest_number = int(match.group(1))
+    if not any(path.name == latest_name for path in generations):
+        raise CheckpointIntegrityError("checkpoint LATEST generation is missing")
+    for generation_dir in generations:
         generation = _generation_number(generation_dir)
         if generation is not None and generation > latest_number:
             shutil.rmtree(generation_dir)
     _fsync_directory(root)
+
+
+def _assert_store_contract(
+    root: Path,
+    *,
+    config_fingerprint: str,
+    data_fingerprint: str,
+    tokenizer_fingerprint: str,
+    run_contract_fingerprint: str,
+) -> None:
+    latest_path = root / LATEST_FILENAME
+    if not latest_path.is_file():
+        return
+    latest_name = latest_path.read_text(encoding="utf-8").strip()
+    manifest = _read_manifest(root / latest_name / MANIFEST_FILENAME)
+    _assert_fingerprints(
+        manifest,
+        expected_config_fingerprint=config_fingerprint,
+        expected_data_fingerprint=data_fingerprint,
+        expected_tokenizer_fingerprint=tokenizer_fingerprint,
+        expected_run_contract_fingerprint=run_contract_fingerprint,
+    )
 
 
 def _next_generation(root: Path) -> int:
@@ -313,6 +352,7 @@ def _assert_fingerprints(
     expected_config_fingerprint: str,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
+    expected_run_contract_fingerprint: str | None,
 ) -> None:
     if manifest.config_fingerprint != expected_config_fingerprint:
         raise CheckpointMismatchError(
@@ -328,6 +368,13 @@ def _assert_fingerprints(
         and manifest.tokenizer_fingerprint != expected_tokenizer_fingerprint
     ):
         raise CheckpointMismatchError("checkpoint tokenizer fingerprint does not match")
+    if (
+        expected_run_contract_fingerprint is not None
+        and manifest.run_contract_fingerprint != expected_run_contract_fingerprint
+    ):
+        raise CheckpointMismatchError(
+            "checkpoint run contract fingerprint does not match"
+        )
 
 
 def _load_generation_payload(
@@ -336,6 +383,7 @@ def _load_generation_payload(
     expected_config_fingerprint: str,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
+    expected_run_contract_fingerprint: str | None,
 ) -> tuple[dict[str, Any], CheckpointManifestV2]:
     manifest = _validate_generation_files(generation_dir)
     _assert_fingerprints(
@@ -343,6 +391,7 @@ def _load_generation_payload(
         expected_config_fingerprint=expected_config_fingerprint,
         expected_data_fingerprint=expected_data_fingerprint,
         expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
+        expected_run_contract_fingerprint=expected_run_contract_fingerprint,
     )
     try:
         payload = torch.load(
@@ -369,6 +418,8 @@ def _load_generation_payload(
         raise CheckpointIntegrityError("checkpoint state and manifest data differ")
     if payload.get("tokenizer_fingerprint") != manifest.tokenizer_fingerprint:
         raise CheckpointIntegrityError("checkpoint state and manifest tokenizer differ")
+    if payload.get("run_contract_fingerprint") != manifest.run_contract_fingerprint:
+        raise CheckpointIntegrityError("checkpoint state and manifest run contract differ")
     if payload.get("step") != manifest.completed_step:
         raise CheckpointIntegrityError("checkpoint state and manifest steps differ")
     if payload.get("tokens_seen") != manifest.tokens_seen:
@@ -407,6 +458,7 @@ def save_checkpoint(
     sample_ids: list[list[str]] | tuple[tuple[str, ...], ...] | None = None,
     data_fingerprint: str = DEFAULT_DATA_FINGERPRINT,
     tokenizer_fingerprint: str = DEFAULT_TOKENIZER_FINGERPRINT,
+    run_contract_fingerprint: str = DEFAULT_RUN_CONTRACT_FINGERPRINT,
     failure_injector: FailureInjector | None = None,
     retention: int = 2,
 ) -> CheckpointManifestV2:
@@ -422,7 +474,7 @@ def save_checkpoint(
         raise ValueError("checkpoint counters cannot be negative")
     if retention < 2:
         raise ValueError("checkpoint retention must keep at least two generations")
-    if not data_fingerprint or not tokenizer_fingerprint:
+    if not data_fingerprint or not tokenizer_fingerprint or not run_contract_fingerprint:
         raise ValueError("checkpoint input fingerprints cannot be empty")
 
     root = Path(path)
@@ -433,6 +485,13 @@ def save_checkpoint(
     root.mkdir(parents=True, exist_ok=True)
     _cleanup_stale_temporaries(root)
     _cleanup_uncommitted_generations(root)
+    _assert_store_contract(
+        root,
+        config_fingerprint=config.fingerprint(),
+        data_fingerprint=data_fingerprint,
+        tokenizer_fingerprint=tokenizer_fingerprint,
+        run_contract_fingerprint=run_contract_fingerprint,
+    )
     generation = _next_generation(root)
     generation_name = f"generation-{generation:08d}"
     temporary_dir = root / f".{generation_name}.tmp-{uuid.uuid4().hex}"
@@ -451,6 +510,7 @@ def save_checkpoint(
         "config_fingerprint": config.fingerprint(),
         "data_fingerprint": data_fingerprint,
         "tokenizer_fingerprint": tokenizer_fingerprint,
+        "run_contract_fingerprint": run_contract_fingerprint,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "step": step,
@@ -481,6 +541,7 @@ def save_checkpoint(
         config_fingerprint=config.fingerprint(),
         data_fingerprint=data_fingerprint,
         tokenizer_fingerprint=tokenizer_fingerprint,
+        run_contract_fingerprint=run_contract_fingerprint,
         state_keys=tuple(sorted(_REQUIRED_STATE_KEYS)),
         cursor=cursor_value,
     )
@@ -539,6 +600,7 @@ def load_checkpoint(
     expected_config: ExperimentConfig,
     expected_data_fingerprint: str | None = None,
     expected_tokenizer_fingerprint: str | None = None,
+    expected_run_contract_fingerprint: str | None = None,
     restore_rng: bool = True,
 ) -> dict[str, Any]:
     """Load a verified checkpoint from a trusted local artifact store.
@@ -579,6 +641,7 @@ def load_checkpoint(
                     expected_config_fingerprint=expected_config.fingerprint(),
                     expected_data_fingerprint=expected_data_fingerprint,
                     expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
+                    expected_run_contract_fingerprint=expected_run_contract_fingerprint,
                 )
                 payload["selected_generation"] = selected_manifest.generation
                 break
@@ -590,6 +653,10 @@ def load_checkpoint(
                 f"no checkpoint generation passed integrity validation: {detail}"
             )
 
+    if payload.get("config") != expected_config.to_dict():
+        raise CheckpointMismatchError(
+            "checkpoint serialized configuration does not match experiment"
+        )
     required = {"model", "optimizer", "step", "tokens_seen", "losses"}
     missing = sorted(required.difference(payload))
     if missing:
