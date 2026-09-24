@@ -122,6 +122,15 @@ def test_trusted_legacy_synthetic_checkpoint_has_an_explicit_v2_migration_path(
         legacy,
     )
 
+    with pytest.raises(CheckpointMismatchError, match="no run contract fingerprint"):
+        load_checkpoint(
+            legacy,
+            model=model,
+            optimizer=optimizer,
+            expected_config=config,
+            expected_run_contract_fingerprint="required-v2-contract",
+        )
+
     resumed, resumed_result = run_training(
         config,
         tmp_path / "legacy-resume",

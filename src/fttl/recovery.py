@@ -49,6 +49,10 @@ class RecoveryReportV1:
     checkpoint_selection_load_seconds: float
     recovery_duration_seconds: float
     ordinary_completion_seconds: float
+    completed_steps: int
+    tokens_seen: int
+    sample_windows: int
+    unique_documents_sampled: int
     config_fingerprint: str
     dataset_fingerprint: str
     tokenizer_fingerprint: str
@@ -223,6 +227,11 @@ def verify_recovery(
     equality["returned_model_tensors"] = state_trees_equal(
         control_model.state_dict(), recovered_model.state_dict()
     )
+    sampled_documents = {
+        sample_id.rsplit(":", 1)[0]
+        for batch in control.sample_ids
+        for sample_id in batch
+    }
     report = RecoveryReportV1(
         schema="RecoveryReportV1",
         failure_point=failure_point,
@@ -245,6 +254,10 @@ def verify_recovery(
         ),
         recovery_duration_seconds=round(recovery_seconds, 6),
         ordinary_completion_seconds=round(ordinary_completion_seconds, 6),
+        completed_steps=control.steps,
+        tokens_seen=control.tokens_seen,
+        sample_windows=sum(len(batch) for batch in control.sample_ids),
+        unique_documents_sampled=len(sampled_documents),
         config_fingerprint=config.fingerprint(),
         dataset_fingerprint=control.data_fingerprint,
         tokenizer_fingerprint=control.tokenizer_fingerprint,

@@ -266,17 +266,26 @@ def _assert_store_contract(
     tokenizer_fingerprint: str,
     run_contract_fingerprint: str,
 ) -> None:
-    latest_path = root / LATEST_FILENAME
-    if not latest_path.is_file():
+    if not (root / LATEST_FILENAME).is_file():
         return
-    latest_name = latest_path.read_text(encoding="utf-8").strip()
-    manifest = _read_manifest(root / latest_name / MANIFEST_FILENAME)
-    _assert_fingerprints(
-        manifest,
-        expected_config_fingerprint=config_fingerprint,
-        expected_data_fingerprint=data_fingerprint,
-        expected_tokenizer_fingerprint=tokenizer_fingerprint,
-        expected_run_contract_fingerprint=run_contract_fingerprint,
+    integrity_errors: list[CheckpointIntegrityError] = []
+    for generation_dir in _candidate_generation_directories(root):
+        try:
+            manifest = _validate_generation_files(generation_dir)
+        except CheckpointIntegrityError as error:
+            integrity_errors.append(error)
+            continue
+        _assert_fingerprints(
+            manifest,
+            expected_config_fingerprint=config_fingerprint,
+            expected_data_fingerprint=data_fingerprint,
+            expected_tokenizer_fingerprint=tokenizer_fingerprint,
+            expected_run_contract_fingerprint=run_contract_fingerprint,
+        )
+        return
+    detail = str(integrity_errors[0]) if integrity_errors else "unknown error"
+    raise CheckpointIntegrityError(
+        f"checkpoint store has no valid generation contract: {detail}"
     )
 
 
@@ -571,11 +580,14 @@ def _load_legacy_checkpoint(
     expected_config: ExperimentConfig,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
+    expected_run_contract_fingerprint: str | None,
 ) -> dict[str, Any]:
     if expected_data_fingerprint not in (None, DEFAULT_DATA_FINGERPRINT):
         raise CheckpointMismatchError("legacy checkpoint has no data fingerprint")
     if expected_tokenizer_fingerprint not in (None, DEFAULT_TOKENIZER_FINGERPRINT):
         raise CheckpointMismatchError("legacy checkpoint has no tokenizer fingerprint")
+    if expected_run_contract_fingerprint is not None:
+        raise CheckpointMismatchError("legacy checkpoint has no run contract fingerprint")
     try:
         payload = torch.load(path, map_location="cpu", weights_only=True)
     except Exception as error:
@@ -604,10 +616,11 @@ def load_checkpoint(
 ) -> dict[str, Any]:
     """Load a verified checkpoint from a trusted local artifact store.
 
-    Integrity, schema, size, digest, and fingerprint checks happen before any
-    state is applied. Corrupt newest generations fall back to the preceding
+    V2 integrity, schema, size, digest, and fingerprint checks happen before
+    deserialization. Corrupt newest generations fall back to the preceding
     valid committed generation. Contract mismatches are rejected rather than
-    silently falling back.
+    silently falling back. The trusted-local v1 migration has no sidecar
+    length or digest and is restricted to the synthetic compatibility path.
     """
 
     source = Path(path)
@@ -617,6 +630,7 @@ def load_checkpoint(
             expected_config=expected_config,
             expected_data_fingerprint=expected_data_fingerprint,
             expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
+            expected_run_contract_fingerprint=expected_run_contract_fingerprint,
         )
         payload["selected_generation"] = 0
     else:

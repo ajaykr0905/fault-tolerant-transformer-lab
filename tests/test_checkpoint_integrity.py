@@ -129,6 +129,37 @@ def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
         )
 
 
+def test_manifest_corruption_falls_back_and_allows_the_next_commit(tmp_path: Path):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.125)
+    publish(store, config, step=2, marker=0.875)
+    newest_manifest = store / "generation-00000002" / "manifest.json"
+    newest_manifest.write_text("{\"truncated\":", encoding="utf-8")
+
+    model, payload = load(store, config)
+    assert payload["step"] == 1
+    for parameter in model.parameters():
+        torch.testing.assert_close(
+            parameter,
+            torch.full_like(parameter, 0.125),
+            rtol=0,
+            atol=0,
+        )
+
+    publish(store, config, step=2, marker=0.5)
+
+    assert (store / "LATEST").read_text(encoding="utf-8").strip() == (
+        "generation-00000003"
+    )
+    assert sorted(path.name for path in store.glob("generation-*")) == [
+        "generation-00000001",
+        "generation-00000003",
+    ]
+    _, resumed = load(store, config)
+    assert resumed["step"] == 2
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

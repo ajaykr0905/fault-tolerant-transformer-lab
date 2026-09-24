@@ -63,7 +63,9 @@ reachable instead of being silently discarded.
 The cursor contains the epoch, document ID, token-window offset, batch ID, next sample IDs, and
 absolute batch index. Sample identities are derived from stable document IDs and offsets. Batch
 identity also includes its occurrence index, which prevents repeated windows from being mistaken
-for the same committed step.
+for the same committed step. Windows are deterministically interleaved across sorted document IDs
+before later windows from the same document, so a short recovery smoke run crosses document
+boundaries without allowing any individual window to span two documents.
 
 ### `CheckpointManifestV2`
 
@@ -105,7 +107,7 @@ serialize state to unique temporary file
   -> write + fsync CheckpointManifestV2
   -> atomic rename temporary generation
   -> fsync checkpoint directory
-  -> atomically publish checksummed LATEST pointer
+  -> atomically publish durable LATEST pointer
   -> fsync checkpoint directory
   -> retain newest two committed generations
 ```
@@ -121,10 +123,12 @@ committed generation only when the newest candidate fails integrity validation. 
 dataset/tokenizer/run-contract mismatches are compatibility errors, not corruption, and therefore
 fail immediately rather than selecting unrelated state.
 
-Before `torch.load`, the loader validates the pointer, schema, byte length, state digest, expected
-state keys, and all compatibility fingerprints. Deserialization uses `weights_only=True` and the
-project requires PyTorch `>=2.10` because of the security boundary described in
-[checkpoint-security.md](checkpoint-security.md).
+For a `CheckpointManifestV2` generation, the loader validates the pointer, schema, byte length,
+state digest, expected state keys, and all compatibility fingerprints before `torch.load`.
+Deserialization uses `weights_only=True` and the project requires PyTorch `>=2.10` because of the
+security boundary described in [checkpoint-security.md](checkpoint-security.md). The explicit
+legacy-v1 migration has no sidecar length or digest, accepts only the synthetic-data contract, and
+must remain a trusted-local compatibility path.
 
 ## Equality proof
 

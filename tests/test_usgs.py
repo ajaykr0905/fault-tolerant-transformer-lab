@@ -17,6 +17,7 @@ from fttl.usgs import (
     load_snapshot,
     parse_feature_collection,
     prepare_snapshot_dataset,
+    snapshot_training_directory,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "usgs_feed.json"
@@ -288,3 +289,42 @@ def test_sealed_feed_enters_the_same_training_and_recovery_pipeline(tmp_path: Pa
         restarts=1,
     )
     assert report.exact_equality
+
+
+def test_prepared_snapshot_is_idempotent_and_new_versions_get_new_paths(
+    tmp_path: Path,
+):
+    snapshot_root = tmp_path / "snapshot"
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        ledger.capture(
+            fixture_bytes(),
+            feed="all-day",
+            captured_at="2026-09-24T00:00:00Z",
+        )
+        _, first_manifest_path, first_snapshot = ledger.seal_snapshot(
+            snapshot_root,
+            feed="all-day",
+        )
+        first_training = snapshot_training_directory(snapshot_root, first_snapshot)
+        first = prepare_snapshot_dataset(first_manifest_path, first_training)
+        repeated = prepare_snapshot_dataset(first_manifest_path, first_training)
+
+        changed = json.loads(fixture_bytes())
+        changed["features"][0]["properties"]["updated"] += 60_000
+        ledger.capture(
+            json.dumps(changed).encode(),
+            feed="all-day",
+            captured_at="2026-09-24T00:01:00Z",
+        )
+        _, second_manifest_path, second_snapshot = ledger.seal_snapshot(
+            snapshot_root,
+            feed="all-day",
+        )
+        second_training = snapshot_training_directory(snapshot_root, second_snapshot)
+        second = prepare_snapshot_dataset(second_manifest_path, second_training)
+
+    assert repeated.dataset_fingerprint == first.dataset_fingerprint
+    assert second_training != first_training
+    assert second.dataset_fingerprint != first.dataset_fingerprint
+    assert load_dataset_manifest(first_training).dataset_fingerprint == first.dataset_fingerprint
+    assert load_dataset_manifest(second_training).dataset_fingerprint == second.dataset_fingerprint

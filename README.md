@@ -27,8 +27,9 @@ uninterrupted control.
 
 The checked-in [recovery matrix](artifacts/peps-recovery-v0.2/matrix.json) records four failure
 scenarios with two consecutive restarts each. All scenarios reached the same final state digest and
-passed every declared equality check. See [the evidence ledger](docs/evidence.md) for commands,
-environment, provenance, and limitations.
+passed every declared equality check. This six-step smoke proof samples 12 windows from 12 training
+documents; it does not claim to train over all 656 corpus documents. See
+[the evidence ledger](docs/evidence.md) for commands, environment, provenance, and limitations.
 
 ## Five-minute local proof (network-free)
 
@@ -109,10 +110,11 @@ prepare batch -> forward/backward -> optimizer update -> commit step + cursor
       +--------------------------------------------------------+
 ```
 
-An uncommitted attempt must reuse the same batch after restart. A checkpoint becomes eligible for
+An uncommitted attempt must reuse the same batch after restart. A v2 checkpoint becomes eligible for
 recovery only after its state file and integrity manifest are durable and its generation is
-atomically published. The loader validates size, digest, schema, expected keys, model configuration,
-dataset identity, tokenizer identity, and run contract before deserialization.
+atomically published. Its loader validates size, digest, schema, expected keys, model configuration,
+dataset identity, tokenizer identity, and run contract before deserialization. The narrowly scoped
+legacy-v1 migration is documented separately as a trusted-local path without a sidecar digest.
 
 Read [the architecture](docs/architecture.md) and [checkpoint security boundary](docs/checkpoint-security.md)
 for the exact state machine and threat model.
@@ -128,6 +130,7 @@ for the exact state machine and threat model.
 - `src/fttl/usgs.py` — bounded capture, SQLite ledger, sealed snapshot, and dataset adapter.
 - `artifacts/peps-recovery-v0.2/` — public-safe manifests and reports; no binary checkpoints.
 - `tests/` — unit, integration, recovery, corruption, provenance, and security-boundary tests.
+- `docs/research-basis.md` — upstream ideas studied, attribution, and non-copying boundary.
 
 ## Evidence boundary
 

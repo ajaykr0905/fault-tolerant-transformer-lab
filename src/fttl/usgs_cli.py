@@ -10,6 +10,7 @@ from fttl.usgs import (
     USGSCaptureLedger,
     fetch_feed,
     prepare_snapshot_dataset,
+    snapshot_training_directory,
 )
 
 
@@ -50,10 +51,8 @@ def main() -> None:
             args.output,
             feed=args.feed,
         )
-    training_manifest = prepare_snapshot_dataset(
-        manifest_path,
-        args.output / "training",
-    )
+    training_dir = snapshot_training_directory(args.output, manifest)
+    training_manifest = prepare_snapshot_dataset(manifest_path, training_dir)
     print(
         json.dumps(
             {
@@ -62,7 +61,7 @@ def main() -> None:
                 "manifest": manifest.to_dict(),
                 "manifest_path": str(manifest_path),
                 "training_dataset_fingerprint": training_manifest.dataset_fingerprint,
-                "training_manifest_path": str(args.output / "training" / "manifest.json"),
+                "training_manifest_path": str(training_dir / "manifest.json"),
             },
             sort_keys=True,
         )

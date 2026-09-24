@@ -14,15 +14,18 @@ loaded only after their surrounding contract is validated.
 
 - PyTorch is constrained to `>=2.10,<3`.
 - Every load uses `torch.load(..., weights_only=True)`.
-- State byte length and SHA-256 are checked before deserialization.
+- For v2 generation stores, state byte length and SHA-256 are checked before deserialization.
 - The manifest schema, expected keys, model configuration, dataset, tokenizer, and run contract are
   validated before state is accepted.
 - Generation publication uses unique temporary paths, file and directory `fsync`, atomic renames,
-  and a checksummed `LATEST` commit record.
+  and a durable, atomically replaced `LATEST` commit record.
 - Only committed generations are fallback candidates.
 - A damaged commit pointer fails closed; a save does not erase generations it cannot classify.
 - The two newest valid generations are retained so a corrupt newest state can fall back safely.
 - Fresh training cannot overwrite a non-empty run directory.
+
+The explicit legacy-v1 migration does not have a sidecar length or digest. It accepts only the
+synthetic-data compatibility contract, still uses `weights_only=True`, and remains trusted-local.
 
 ## Why PyTorch 2.10 is the floor
 

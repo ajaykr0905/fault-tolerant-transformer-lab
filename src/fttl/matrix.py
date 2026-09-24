@@ -39,6 +39,10 @@ class RecoveryMatrixV1:
     run_contract_fingerprint: str
     code_fingerprint: str
     code_revision: str
+    completed_steps: int
+    tokens_seen: int
+    sample_windows: int
+    unique_documents_sampled: int
     scenarios: tuple[MatrixScenarioV1, ...]
     integrity_checks: dict[str, bool]
     all_passed: bool
@@ -138,11 +142,11 @@ def _changed_model_config_is_rejected(
     return False
 
 
-def _corrupt_newest_falls_back_exactly(
+def _truncated_newest_state_falls_back_exactly(
     config: ExperimentConfig, dataset_manifest: Path, scratch: Path
 ) -> bool:
-    control_dir = scratch / "fallback-control"
-    recovered_dir = scratch / "fallback-recovered"
+    control_dir = scratch / "state-fallback-control"
+    recovered_dir = scratch / "state-fallback-recovered"
     _, control = run_training(config, control_dir, dataset_manifest=dataset_manifest)
     _, partial = run_training(
         config,
@@ -152,8 +156,35 @@ def _corrupt_newest_falls_back_exactly(
     )
     store = recovered_dir / partial.checkpoint
     latest = (store / "LATEST").read_text(encoding="utf-8").strip()
-    newest = store / latest / "state.pt"
-    newest.write_bytes(newest.read_bytes()[:64])
+    newest_state = store / latest / "state.pt"
+    newest_state.write_bytes(newest_state.read_bytes()[:64])
+    _, recovered = run_training(
+        config,
+        recovered_dir,
+        dataset_manifest=dataset_manifest,
+        resume_from=store,
+    )
+    return recovered.recovered_from_generation == 1 and (
+        recovered.final_state_digest == control.final_state_digest
+    )
+
+
+def _corrupt_newest_manifest_falls_back_exactly(
+    config: ExperimentConfig, dataset_manifest: Path, scratch: Path
+) -> bool:
+    control_dir = scratch / "manifest-fallback-control"
+    recovered_dir = scratch / "manifest-fallback-recovered"
+    _, control = run_training(config, control_dir, dataset_manifest=dataset_manifest)
+    _, partial = run_training(
+        config,
+        recovered_dir,
+        dataset_manifest=dataset_manifest,
+        stop_after_step=2,
+    )
+    store = recovered_dir / partial.checkpoint
+    latest = (store / "LATEST").read_text(encoding="utf-8").strip()
+    newest_manifest = store / latest / "manifest.json"
+    newest_manifest.write_text("{\"truncated\":", encoding="utf-8")
     _, recovered = run_training(
         config,
         recovered_dir,
@@ -202,8 +233,15 @@ def verify_recovery_matrix(
             "changed_model_config_rejected": _changed_model_config_is_rejected(
                 config, dataset_manifest, scratch
             ),
-            "corrupt_newest_falls_back_exactly": _corrupt_newest_falls_back_exactly(
+            "truncated_newest_state_falls_back_exactly": (
+                _truncated_newest_state_falls_back_exactly(
+                    config, dataset_manifest, scratch
+                )
+            ),
+            "corrupt_newest_manifest_falls_back_exactly": (
+                _corrupt_newest_manifest_falls_back_exactly(
                 config, dataset_manifest, scratch
+                )
             ),
         }
 
@@ -215,6 +253,10 @@ def verify_recovery_matrix(
         run_contract_fingerprint=first_report.run_contract_fingerprint,
         code_fingerprint=first_report.code_fingerprint,
         code_revision=first_report.code_revision,
+        completed_steps=first_report.completed_steps,
+        tokens_seen=first_report.tokens_seen,
+        sample_windows=first_report.sample_windows,
+        unique_documents_sampled=first_report.unique_documents_sampled,
         scenarios=tuple(scenarios),
         integrity_checks=integrity_checks,
         all_passed=all(scenario.exact_equality for scenario in scenarios)

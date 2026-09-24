@@ -193,7 +193,7 @@ class PreparedDatasetBatchSource:
         self.data_fingerprint = data_fingerprint
         self.tokenizer_fingerprint = tokenizer_fingerprint
         width = config.model.block_size + 1
-        windows: list[_TokenWindow] = []
+        windows_by_document: list[tuple[_TokenWindow, ...]] = []
         for document in sorted(documents, key=lambda item: item.document_id):
             encoded = tuple(document.text.encode("utf-8")) + (256,)
             if len(encoded) < width:
@@ -202,14 +202,24 @@ class PreparedDatasetBatchSource:
             final_offset = len(encoded) - width
             if offsets[-1] != final_offset:
                 offsets.append(final_offset)
-            for offset in offsets:
-                windows.append(
+            windows_by_document.append(
+                tuple(
                     _TokenWindow(
                         document_id=document.document_id,
                         offset=offset,
                         tokens=encoded[offset : offset + width],
                     )
+                    for offset in offsets
                 )
+            )
+        windows = [
+            document_windows[window_index]
+            for window_index in range(
+                max((len(value) for value in windows_by_document), default=0)
+            )
+            for document_windows in windows_by_document
+            if window_index < len(document_windows)
+        ]
         if len(windows) < config.batch_size:
             raise ValueError("prepared dataset has fewer full windows than one batch")
         self._windows = tuple(windows)

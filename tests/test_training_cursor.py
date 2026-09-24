@@ -65,7 +65,7 @@ def test_synthetic_cursor_rejects_silent_advancement():
         source.batch(replace(cursor, batch_index=1))
 
 
-def test_document_windows_are_stable_and_do_not_cross_documents():
+def test_document_windows_are_stable_interleaved_and_do_not_cross_documents():
     source = PreparedDatasetBatchSource(
         config(),
         [
@@ -80,15 +80,16 @@ def test_document_windows_are_stable_and_do_not_cross_documents():
     repeated = source.batch(source.initial_cursor())
 
     assert first.batch_id == repeated.batch_id
-    assert first.sample_ids == ("pep-alpha:000000000000", "pep-alpha:000000000004")
+    assert first.sample_ids == ("pep-alpha:000000000000", "pep-beta:000000000000")
     assert torch.equal(first.inputs, repeated.inputs)
     assert first.next_cursor.batch_index == 1
     assert first.next_cursor.next_sample_ids == (
-        "pep-alpha:000000000008",
-        "pep-alpha:000000000011",
+        "pep-alpha:000000000004",
+        "pep-beta:000000000004",
     )
-    second = source.batch(first.next_cursor)
-    assert second.targets[1, -1].item() == 256
+    tail_batch = source.batch(source.cursor_at(2))
+    assert tail_batch.sample_ids[1] == "pep-beta:000000000006"
+    assert tail_batch.targets[1, -1].item() == 256
 
 
 def test_utf8_dataset_requires_byte_token_vocabulary():

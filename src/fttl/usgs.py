@@ -14,7 +14,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from fttl.dataset import DatasetManifestV1, DatasetSource, prepare_document_records
+from fttl.dataset import (
+    DatasetManifestV1,
+    DatasetSource,
+    load_dataset_manifest,
+    prepare_document_records,
+)
 
 USGS_ATTRIBUTION = "U.S. Geological Survey (USGS)"
 USGS_LICENSE_NOTE = (
@@ -588,9 +593,38 @@ def prepare_snapshot_dataset(
         artifact_kind="sealed-jsonl",
         url_override=snapshot.feed_url,
     )
+    existing_manifest = output_dir / "manifest.json"
+    if existing_manifest.is_file():
+        prepared = load_dataset_manifest(existing_manifest)
+        expected_source = {
+            "repository": source.repository,
+            "revision": source.revision,
+            "path": source.path,
+            "url": source.url,
+            "artifact_kind": source.artifact_kind,
+            "artifact_sha256": source.compressed_sha256,
+            "compressed_sha256": source.compressed_sha256,
+        }
+        if any(
+            prepared.source.get(field) != value
+            for field, value in expected_source.items()
+        ) or prepared.counts.get("documents") != source.expected_document_count:
+            raise USGSValidationError(
+                "existing prepared snapshot does not match the sealed source"
+            )
+        return prepared
     return prepare_document_records(
         records,
         output_dir,
         source_artifact=data_path,
         source=source,
     )
+
+
+def snapshot_training_directory(
+    snapshot_root: Path,
+    snapshot: SealedSnapshotV1,
+) -> Path:
+    """Return the immutable prepared-data directory for one sealed snapshot."""
+
+    return Path(snapshot_root) / "training" / snapshot.snapshot_fingerprint

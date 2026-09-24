@@ -68,6 +68,10 @@ def test_two_consecutive_restarts_match_uninterrupted_real_data_run(tmp_path: Pa
     assert report.replayed_steps == 2
     assert report.replayed_tokens == 32
     assert report.discarded_compute_tokens == 32
+    assert report.completed_steps == 4
+    assert report.tokens_seen == 64
+    assert report.sample_windows == 8
+    assert report.unique_documents_sampled == 2
     assert all(attempt.sample_ids == attempt.replayed_sample_ids for attempt in report.attempts)
     assert all(report.equality.values())
     assert (tmp_path / "evidence" / "recovery-report.json").is_file()
@@ -113,6 +117,12 @@ def test_real_dataset_manifest_and_cursor_are_bound_to_the_checkpoint(tmp_path: 
     assert resumed.steps == 4
     assert resumed.final_cursor["batch_index"] == 4
     assert len(resumed.sample_ids) == len(resumed.batch_ids) == 4
+    sampled_documents = {
+        sample_id.rsplit(":", 1)[0]
+        for batch in resumed.sample_ids
+        for sample_id in batch
+    }
+    assert len(sampled_documents) == 2
     assert resumed.data_fingerprint == partial.data_fingerprint
 
 
@@ -155,6 +165,10 @@ def test_complete_matrix_is_public_safe_and_passes_all_scenarios(tmp_path: Path)
         "during-checkpoint-write",
     }
     assert all(matrix.integrity_checks.values())
+    assert matrix.completed_steps == 4
+    assert matrix.tokens_seen == 64
+    assert matrix.sample_windows == 8
+    assert matrix.unique_documents_sampled == 2
     public_json = "\n".join(
         path.read_text(encoding="utf-8") for path in output.rglob("*.json")
     )

@@ -34,6 +34,11 @@ manifest and reports, not the downloaded corpus or binary checkpoints.
 
 ## Result
 
+The checked matrix is intentionally a six-step recovery smoke test: 12 sample windows from 12
+unique documents in the 536-document training split, for 384 input tokens. The manifest covers 656
+documents, but this artifact does not claim that every document was consumed or that the model was
+trained to useful quality.
+
 | Failure point | Restarts | Exact equality | Durable committed steps/tokens lost | Replayed tokens |
 | --- | ---: | --- | --- | ---: |
 | Before forward | 2 | Yes | `0 / 0` | 128 |
@@ -54,7 +59,8 @@ and run fingerprint. The matrix also records successful rejection/fallback check
 - one changed prepared-dataset byte;
 - changed tokenizer identity;
 - changed model configuration;
-- truncated newest checkpoint followed by exact fallback to the previous committed generation.
+- truncated newest state followed by exact fallback to the previous committed generation;
+- corrupt newest manifest followed by exact fallback, resume, and a new durable commit.
 
 Canonical files:
 
@@ -69,7 +75,7 @@ Canonical files:
 - Device: CPU
 - Architecture: arm64
 - Python: 3.12.14
-- PyTorch: 2.14.0
+- PyTorch: 2.13.0
 - PyTorch CPU threads: 5
 
 Local wall-clock recovery values are recorded for reproducibility but are not a benchmark or service
