@@ -14,10 +14,20 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/smoke.json"))
     parser.add_argument("--output", type=Path, default=Path("artifacts/smoke"))
     parser.add_argument("--resume", type=Path)
+    parser.add_argument(
+        "--stop-after-step",
+        type=int,
+        help="Stop after this committed step to create a deterministic resume boundary.",
+    )
     args = parser.parse_args()
 
     config = ExperimentConfig.from_json(args.config.read_text(encoding="utf-8"))
-    _, result = run_training(config, args.output, resume_from=args.resume)
+    _, result = run_training(
+        config,
+        args.output,
+        resume_from=args.resume,
+        stop_after_step=args.stop_after_step,
+    )
     print(json.dumps(asdict(result), sort_keys=True))
 
 

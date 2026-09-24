@@ -56,3 +56,29 @@ def test_checkpoint_rejects_configuration_drift(tmp_path: Path):
             optimizer=optimizer,
             expected_config=changed,
         )
+
+
+def test_resume_rejects_a_boundary_at_or_behind_the_checkpoint(tmp_path: Path):
+    config = tiny_config()
+    _, result = run_training(config, tmp_path / "run", stop_after_step=2)
+
+    with pytest.raises(ValueError, match="greater than the checkpoint"):
+        run_training(
+            config,
+            tmp_path / "run",
+            resume_from=Path(result.checkpoint),
+            stop_after_step=1,
+        )
+
+    with pytest.raises(ValueError, match="greater than the checkpoint"):
+        run_training(
+            config,
+            tmp_path / "run",
+            resume_from=Path(result.checkpoint),
+            stop_after_step=2,
+        )
+
+
+def test_training_rejects_non_positive_stop_boundary(tmp_path: Path):
+    with pytest.raises(ValueError, match="at least 1"):
+        run_training(tiny_config(), tmp_path / "run", stop_after_step=0)

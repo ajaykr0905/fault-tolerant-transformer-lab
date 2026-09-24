@@ -42,6 +42,9 @@ def run_training(
     resume_from: Path | None = None,
     stop_after_step: int | None = None,
 ) -> tuple[TinyTransformer, TrainingResult]:
+    if stop_after_step is not None and stop_after_step < 1:
+        raise ValueError("stop_after_step must be at least 1")
+
     seed_everything(config.seed)
     model = TinyTransformer(config.model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
@@ -64,7 +67,11 @@ def run_training(
     checkpoint_path = output_dir / "checkpoint.pt"
     token_count = max(2_048, config.model.block_size * config.batch_size * 32)
     tokens = synthetic_token_stream(token_count, config.model.vocab_size)
-    final_step = min(config.steps, stop_after_step or config.steps)
+    final_step = min(config.steps, stop_after_step if stop_after_step is not None else config.steps)
+    if final_step <= start_step:
+        raise ValueError(
+            "requested training boundary must be greater than the checkpoint's completed step"
+        )
     started = time.perf_counter()
 
     model.train()
