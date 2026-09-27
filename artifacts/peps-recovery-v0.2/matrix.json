@@ -1,0 +1,80 @@
+{
+  "all_passed": true,
+  "code_fingerprint": "045ed43be9b980ab49b57fd79b4c0319cf8372be3547d4ab3f794a013f606c49",
+  "code_revision": "8477b8252c2cfbba584acd1024af65d1aef235a6",
+  "completed_steps": 6,
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "integrity_checks": {
+    "changed_dataset_byte_rejected": true,
+    "changed_model_config_rejected": true,
+    "changed_tokenizer_rejected": true,
+    "corrupt_newest_manifest_falls_back_exactly": true,
+    "truncated_newest_state_falls_back_exactly": true
+  },
+  "limitations": [
+    "Failures are deterministic Python crash surrogates, not OS-kill or power-loss tests.",
+    "Results prove this pinned CPU run, not model quality, GPU scale, or production readiness.",
+    "SHA-256 detects accidental corruption but does not authenticate attacker-controlled artifacts."
+  ],
+  "run_contract_fingerprint": "9ab8d151c9bbf504d387db8b4020c23cd050b425ffdef0fa03ec46238f8601e3",
+  "sample_windows": 12,
+  "scenarios": [
+    {
+      "checkpoint_selection_load_seconds": 0.060167,
+      "completed_restarts": 2,
+      "discarded_compute_tokens": 0,
+      "exact_equality": true,
+      "failure_point": "before-forward",
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.206218,
+      "recovery_duration_seconds": 2.813724,
+      "replayed_steps": 2,
+      "replayed_tokens": 128,
+      "report_path": "scenarios/before-forward/recovery-report.json"
+    },
+    {
+      "checkpoint_selection_load_seconds": 0.034986,
+      "completed_restarts": 2,
+      "discarded_compute_tokens": 128,
+      "exact_equality": true,
+      "failure_point": "after-backward",
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.179112,
+      "recovery_duration_seconds": 3.663566,
+      "replayed_steps": 2,
+      "replayed_tokens": 128,
+      "report_path": "scenarios/after-backward/recovery-report.json"
+    },
+    {
+      "checkpoint_selection_load_seconds": 0.043742,
+      "completed_restarts": 2,
+      "discarded_compute_tokens": 128,
+      "exact_equality": true,
+      "failure_point": "after-optimizer",
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.204289,
+      "recovery_duration_seconds": 3.084902,
+      "replayed_steps": 2,
+      "replayed_tokens": 128,
+      "report_path": "scenarios/after-optimizer/recovery-report.json"
+    },
+    {
+      "checkpoint_selection_load_seconds": 0.035134,
+      "completed_restarts": 2,
+      "discarded_compute_tokens": 128,
+      "exact_equality": true,
+      "failure_point": "during-checkpoint-write",
+      "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+      "ordinary_completion_seconds": 1.459471,
+      "recovery_duration_seconds": 3.062532,
+      "replayed_steps": 2,
+      "replayed_tokens": 128,
+      "report_path": "scenarios/during-checkpoint-write/recovery-report.json"
+    }
+  ],
+  "schema": "RecoveryMatrixV1",
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "unique_documents_sampled": 12
+}

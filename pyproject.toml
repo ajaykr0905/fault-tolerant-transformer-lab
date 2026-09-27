@@ -4,21 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fault-tolerant-transformer-lab"
-version = "0.1.0"
+version = "0.2.0"
 description = "A reproducible small-transformer lab for checkpoint recovery and controlled experiments."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Ajay Kumar Pondugala" }]
-dependencies = ["numpy>=2,<3", "torch>=2.5,<3"]
+dependencies = ["numpy>=2,<3", "torch>=2.10,<3"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
-serve = ["vllm>=0.7,<1", "prometheus-client>=0.21,<1"]
+test = ["pytest>=8,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
 fttl-train-smoke = "fttl.cli:main"
 fttl-compare-tuning = "fttl.ablation_cli:main"
+fttl-prepare-peps = "fttl.prepare_peps_cli:main"
+fttl-verify-recovery = "fttl.recovery_cli:main"
+fttl-recovery-matrix = "fttl.matrix_cli:main"
+fttl-capture-usgs = "fttl.usgs_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -26,3 +30,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I"]

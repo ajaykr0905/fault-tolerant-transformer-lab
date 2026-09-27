@@ -1,0 +1,105 @@
+{
+  "attempts": [
+    {
+      "attempted_step": 2,
+      "attempted_tokens": 64,
+      "batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+      "checkpoint_load_seconds": 0.022933,
+      "committed_step": 1,
+      "discarded_compute_tokens": 64,
+      "failure_point": "after-optimizer",
+      "replayed_sample_ids": [
+        "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+        "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+      ],
+      "replayed_tokens": 64,
+      "restart_to_replayed_commit_seconds": 1.608494,
+      "sample_ids": [
+        "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+        "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+      ],
+      "selected_generation": 1
+    },
+    {
+      "attempted_step": 3,
+      "attempted_tokens": 64,
+      "batch_id": "140d02fe0712f4521765f56df50a36443c7b92367b4e333b312c12f39b02367c",
+      "checkpoint_load_seconds": 0.020809,
+      "committed_step": 2,
+      "discarded_compute_tokens": 64,
+      "failure_point": "after-optimizer",
+      "replayed_sample_ids": [
+        "017ded8c419ba7853fed6e2475ae7f6aca9b50c36148e554ecbd7e9f796b2597:000000000000",
+        "01af394ef7f18c9c95045bb3215b1dd0d56dcb8efebe0d2a77a4459225226a2e:000000000000"
+      ],
+      "replayed_tokens": 64,
+      "restart_to_replayed_commit_seconds": 1.476407,
+      "sample_ids": [
+        "017ded8c419ba7853fed6e2475ae7f6aca9b50c36148e554ecbd7e9f796b2597:000000000000",
+        "01af394ef7f18c9c95045bb3215b1dd0d56dcb8efebe0d2a77a4459225226a2e:000000000000"
+      ],
+      "selected_generation": 2
+    }
+  ],
+  "checkpoint_selection_load_seconds": 0.043742,
+  "code_fingerprint": "045ed43be9b980ab49b57fd79b4c0319cf8372be3547d4ab3f794a013f606c49",
+  "code_revision": "8477b8252c2cfbba584acd1024af65d1aef235a6",
+  "completed_restarts": 2,
+  "completed_steps": 6,
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "control_run_fingerprint": "a554641cd9311e19a9aa4622565c27b02d11d445fcaec8718d925650c00b51ea",
+  "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "discarded_compute_tokens": 128,
+  "durable_committed_steps_lost": 0,
+  "durable_committed_tokens_lost": 0,
+  "equality": {
+    "batch_id_sequence": true,
+    "completed_steps": true,
+    "cursor": true,
+    "final_logits": true,
+    "final_state_digest": true,
+    "loss_sequence": true,
+    "model_tensors": true,
+    "optimizer_tensors": true,
+    "returned_model_tensors": true,
+    "rng_state": true,
+    "run_fingerprint": true,
+    "sample_id_sequence": true,
+    "token_count": true
+  },
+  "exact_equality": true,
+  "failure_point": "after-optimizer",
+  "final_state_digest": "59e52598bed00b566d41aa57a2b94581bb266674606f775770a7b42d93d17386",
+  "hardware": {
+    "device": "cpu",
+    "machine": "arm64",
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "python": "3.12.14",
+    "pytorch": "2.13.0",
+    "torch_threads": 5
+  },
+  "limitations": [
+    "This report proves deterministic CPU recovery for this pinned run only.",
+    "It does not measure model quality, GPU behavior, distributed scale, or production readiness.",
+    "Recovery duration is local wall-clock evidence and is not a service-level objective.",
+    "Checkpoint hashes detect corruption but do not authenticate attacker-controlled artifacts."
+  ],
+  "max_recovery_point_lag_steps": 1,
+  "ordinary_completion_seconds": 1.204289,
+  "recovered_run_fingerprint": "a554641cd9311e19a9aa4622565c27b02d11d445fcaec8718d925650c00b51ea",
+  "recovery_duration_seconds": 3.084902,
+  "replayed_steps": 2,
+  "replayed_tokens": 128,
+  "requested_restarts": 2,
+  "run_contract_fingerprint": "9ab8d151c9bbf504d387db8b4020c23cd050b425ffdef0fa03ec46238f8601e3",
+  "sample_windows": 12,
+  "schema": "RecoveryReportV1",
+  "selected_generations": [
+    1,
+    2,
+    3
+  ],
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "unique_documents_sampled": 12
+}
