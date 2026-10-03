@@ -9,6 +9,7 @@ opened with ``torch.load(..., weights_only=True)``.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -691,10 +692,20 @@ def load_checkpoint(
         raise CheckpointIntegrityError(
             f"checkpoint state is missing keys: {', '.join(missing)}"
         )
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_rng = capture_rng_state()
+
+    def rollback() -> None:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        restore_rng_state(original_rng)
+
     try:
         model.load_state_dict(payload["model"])
         optimizer.load_state_dict(payload["optimizer"])
     except (KeyError, TypeError, RuntimeError, ValueError) as error:
+        rollback()
         raise CheckpointMismatchError(
             "checkpoint model or optimizer state does not match experiment"
         ) from error
@@ -704,6 +715,7 @@ def load_checkpoint(
                 restore_rng_state(payload["rng_state"])
             elif "torch_rng_state" in payload:
                 torch.set_rng_state(payload["torch_rng_state"])
-        except (KeyError, TypeError, RuntimeError, ValueError) as error:
+        except (KeyError, TypeError, RuntimeError, ValueError, OverflowError) as error:
+            rollback()
             raise CheckpointIntegrityError("checkpoint RNG state is invalid") from error
     return payload

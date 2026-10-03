@@ -17,6 +17,9 @@ loaded only after their surrounding contract is validated.
 - For v2 generation stores, state byte length and SHA-256 are checked before deserialization.
 - The manifest schema, expected keys, model configuration, dataset, tokenizer, and run contract are
   validated before state is accepted.
+- Rejected model, optimizer, or RNG state restores the caller's original training objects and random
+  generators. Loading takes in-memory copies for rollback, so allow space for another model and
+  optimizer state. This guard is intended for this lab's small CPU models, not a GPU-scale claim.
 - Generation publication uses unique temporary paths, file and directory `fsync`, atomic renames,
   and a durable, atomically replaced `LATEST` commit record.
 - Only committed generations are fallback candidates.

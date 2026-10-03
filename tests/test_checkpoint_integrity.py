@@ -16,6 +16,7 @@ from fttl.checkpoint import (
 )
 from fttl.config import ExperimentConfig, ModelConfig
 from fttl.model import TinyTransformer
+from fttl.state import capture_rng_state, state_trees_equal
 
 
 def checkpoint_config() -> ExperimentConfig:
@@ -218,6 +219,37 @@ def test_state_read_errors_use_integrity_fallback(
         for parameter in model.parameters():
             torch.testing.assert_close(parameter, torch.full_like(parameter, 0.125), rtol=0, atol=0)
     assert (store / "LATEST").read_text().strip() == "generation-00000002"
+
+
+@pytest.mark.parametrize("invalid_component", ["model", "optimizer", "rng_state"])
+def test_rejected_payload_preserves_caller_training_objects(tmp_path: Path, invalid_component):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.125)
+    generation = store / "generation-00000001"
+    state_path = generation / "state.pt"
+    payload = torch.load(state_path, weights_only=True)
+    if invalid_component == "model":
+        payload["model"]["blocks.0.mlp.0.weight"] = torch.zeros(1)
+    elif invalid_component == "optimizer":
+        payload["optimizer"]["param_groups"] = []
+    else:
+        payload["rng_state"]["torch_cpu"] = torch.zeros(1, dtype=torch.uint8)
+    torch.save(payload, state_path)
+    manifest_path = generation / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["state_sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+    manifest["state_bytes"] = state_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest))
+    model, optimizer = model_and_optimizer(config)
+    before_model = {name: value.clone() for name, value in model.state_dict().items()}
+    before_optimizer = optimizer.state_dict()
+    before_rng = capture_rng_state()
+    with pytest.raises((CheckpointMismatchError, CheckpointIntegrityError)):
+        load_checkpoint(store, model=model, optimizer=optimizer, expected_config=config)
+    assert state_trees_equal(before_model, model.state_dict())
+    assert state_trees_equal(before_optimizer, optimizer.state_dict())
+    assert state_trees_equal(before_rng, capture_rng_state())
 
 
 def test_manifest_corruption_falls_back_and_allows_the_next_commit(tmp_path: Path):
