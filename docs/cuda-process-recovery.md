@@ -3,8 +3,39 @@
 This experiment extends the single-device lab with one process-death boundary:
 after the optimizer updates step 2, before that step publishes a checkpoint.
 It uses actual POSIX `SIGKILL`, not a caught exception or reconstruction inside
-the same training process. GPU validation is pending until a measured report is
-published. The October 3 T4 report proves only same-process reconstruction.
+the same training process. The measured October 4 CLI report verifies this one
+boundary on a T4. The corrected complete GPU regression gate is still pending;
+the October 3 T4 report separately proves only same-process reconstruction.
+
+## Measured run and verification status
+
+The [raw Colab export](../artifacts/colab-cuda-process-2026-10-04/cuda-process-recovery-report.json)
+was downloaded and matched the SHA-256 printed by the running notebook:
+`ee77c790103d13d145067570ab77d48c03a2428a048e9564c12552013b4ef8cd`.
+Its timestamp is October 4, 2026, 03:51:44 IST
+(`2026-10-03T22:21:44.234457+00:00`). It ran public PEP data at revision
+`8dd38161ea2563eb3fb82ee960c039141b00cae2` on a Tesla T4, PyTorch
+`2.13.0+cu130`, CUDA build 13.0, eager FP32 and strict deterministic controls.
+
+Four distinct spawned worker PIDs, SIGKILL exit `-9`, durable/selected step 1,
+step-2 batch/sample replay, all 22 exact-equality checks, and six completed steps
+(384 tokens) are recorded. Sixty-four compute tokens were discarded; no durable
+committed steps or tokens were lost. Replay spawn to committed-step receipt was
+6.042 seconds, including imports, CUDA initialization, restore, save and IPC;
+it is an observation, not a performance benchmark.
+
+Verification chronology matters: the original process test module had 28 passes
+and one failure because a CPU AdamW observer test initialized the pytest parent's
+CUDA context. The original hardware integration passed alone in a fresh pytest
+process, and the public-data CLI run above passed. The test-isolation fix preserves
+the verifier's CPU-only-parent guard and exercises the public CLI in a separate
+process. Its corrected full GPU gate has **not yet been observed passing**.
+
+The CPU artifact test protects the exact downloaded bytes and historical report
+contracts; it does not authenticate hardware execution. No tensor/checkpoint
+binaries were exported, so readers cannot independently rehash the reported final
+tensor digest from this JSON. No new results screenshot or executed public Drive
+copy is published. Do not treat the unexecuted operating notebook as GPU proof.
 
 ## Run
 
@@ -12,8 +43,10 @@ Open the [pinned process-recovery notebook](../notebooks/colab_cuda_process_reco
 in Colab, select a free T4 GPU when available, and run its cells in order. It
 checks the actual hardware, refuses skipped GPU tests, and exports the report.
 The notebook pins implementation revision
-`8dd38161ea2563eb3fb82ee960c039141b00cae2`; it does not train whatever happens to
+`65d280888e0f34aa9dc7107f8197dcef7f48fa34`; it does not train whatever happens to
 be on a moving branch. The public notebook is unexecuted and is not GPU evidence.
+This revision includes the test-isolation fix; the measured historical report
+above retains its original revision and is not relabeled as a newer run.
 
 Use a free interactive Colab GPU or an existing Linux NVIDIA environment with
 the committed dependency lock. Prepare the public PEP dataset using the existing

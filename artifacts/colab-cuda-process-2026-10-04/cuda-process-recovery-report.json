@@ -1,0 +1,123 @@
+{
+  "attempted_step": 2,
+  "code_fingerprint": "0daa13b08c73f126acc052efc406b04a3adc0201762860b194b0cbb9be45c05b",
+  "code_revision": "8dd38161ea2563eb3fb82ee960c039141b00cae2",
+  "config": {
+    "batch_size": 2,
+    "checkpoint_every": 1,
+    "learning_rate": 0.0003,
+    "model": {
+      "block_size": 32,
+      "d_model": 32,
+      "dropout": 0.2,
+      "n_heads": 4,
+      "n_layers": 2,
+      "vocab_size": 257
+    },
+    "seed": 2712,
+    "steps": 6
+  },
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "data_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "discarded_compute_tokens": 64,
+  "durable_committed_steps_lost": 0,
+  "durable_committed_tokens_lost": 0,
+  "durable_step_before_kill": 1,
+  "equality": {
+    "batch_ids": true,
+    "completion_execution_contract": true,
+    "completion_selected_step": true,
+    "completion_worker_pid": true,
+    "cursor": true,
+    "dataset_contract": true,
+    "expected_completed_state": true,
+    "final_checkpoint_model": true,
+    "final_checkpoint_optimizer": true,
+    "final_checkpoint_rng": true,
+    "generation": true,
+    "independent_worker_pids": true,
+    "logits": true,
+    "losses": true,
+    "model": true,
+    "optimizer": true,
+    "parent_cuda_uninitialized": true,
+    "replay_execution_contract": true,
+    "rng": true,
+    "sample_ids": true,
+    "steps": true,
+    "tokens_seen": true
+  },
+  "exact_equality": true,
+  "execution": {
+    "compute_capability": [
+      7,
+      5
+    ],
+    "cublas_workspace_config": ":4096:8",
+    "cuda_version": "13.0",
+    "cudnn_benchmark": false,
+    "cudnn_version": 92000,
+    "deterministic_algorithms": true,
+    "deterministic_warn_only": false,
+    "device": "cuda:0",
+    "execution": "eager",
+    "gpu_name": "Tesla T4",
+    "initialization_dtype": "torch.float32",
+    "optimizer_policy": "AdamW foreach=False fused=False",
+    "precision": "float32",
+    "tf32": false,
+    "torch_version": "2.13.0+cu130",
+    "total_memory_bytes": 15637086208
+  },
+  "failed_batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+  "failed_sample_ids": [
+    "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+    "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+  ],
+  "failure_point": "after-optimizer",
+  "final_state_digest": "1e79eb12ad7b8ff72b0c87c32649f532a7d277c92ef1877aad1a67bdb67d0cea",
+  "interrupted_exitcode": -9,
+  "kill_signal": "SIGKILL",
+  "limitations": [
+    "One parent-paused after-optimizer boundary on one CUDA device; not arbitrary asynchronous kill times.",
+    "The OS, GPU driver and filesystem remain running; not power loss or device failure.",
+    "Exact equality applies only to this FP32 eager hardware/software execution contract.",
+    "No cross-device, mixed-precision, distributed-scale, quality, serving or production evidence.",
+    "Local spawn/IPC measurements are observations, not benchmarks or service-level objectives.",
+    "CPU snapshots and checkpoints are trusted local artifacts; hashes are not authentication."
+  ],
+  "process_start_method": "spawn",
+  "replayed_batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+  "replayed_sample_ids": [
+    "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+    "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+  ],
+  "run_contract_fingerprint": "87f1466e7bc875dc9ad0135537ade14149e36c40d646fb5d74a4f7fde289e8bf",
+  "schema": "CudaProcessRecoveryReportV1",
+  "selected_generation": 1,
+  "selected_step": 1,
+  "steps": 6,
+  "timing_boundaries": {
+    "checkpoint_selection_load": "Replay worker load, CPU/CUDA RNG restoration and CUDA synchronization.",
+    "completion_spawn_to_exit": "Parent spawn to joined completion exit, including synchronized GPU work and CPU snapshot writing.",
+    "control_spawn_to_exit": "Parent spawn to joined control exit, including synchronized GPU work and CPU snapshot writing.",
+    "kill_request_to_exit": "Parent SIGKILL request to joined worker exit.",
+    "resume_spawn_to_replayed_commit_receipt": "Parent spawn to receipt after replayed durable save and CUDA synchronization; includes imports, restore and IPC."
+  },
+  "timings_seconds": {
+    "checkpoint_selection_load": 0.025358796000091388,
+    "completion_spawn_to_exit": 6.3119285859997944,
+    "control_spawn_to_exit": 7.280014050999853,
+    "kill_request_to_exit": 0.17061226799978613,
+    "resume_spawn_to_replayed_commit_receipt": 6.042123258000174
+  },
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "verified_at_utc": "2026-10-03T22:21:44.234457+00:00",
+  "worker_pids": {
+    "completion": 13079,
+    "control": 12974,
+    "interrupted": 13010,
+    "replay": 13040
+  }
+}

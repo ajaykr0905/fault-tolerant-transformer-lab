@@ -126,8 +126,12 @@ See the [Colab notebook and evidence](docs/colab-gpu-evidence.md) for the execut
 report and access limitations; screenshot capture is not yet published.
 
 The separate [CUDA process-death verifier](docs/cuda-process-recovery.md) checks
-one actual SIGKILL boundary using independently spawned GPU workers. Its new GPU
-validation is pending; the October 3 reconstruction report does not prove it.
+one actual SIGKILL boundary using independently spawned GPU workers. The
+[October 4 T4 export](artifacts/colab-cuda-process-2026-10-04/cuda-process-recovery-report.json)
+records all 22 equality checks passing after step-1 restore and step-2 replay.
+The original full GPU test gate failed a test-isolation precondition; its
+corrected full-suite rerun is still pending. This measured CLI run is not proof
+of arbitrary failure recovery or production reliability.
 
 ## Research references and upstream work
 
