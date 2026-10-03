@@ -1,0 +1,156 @@
+{
+  "batch_ids": [
+    "37b3a2368aaa16e74c73244754dc3fe91cc053f437848cf4c6f74f460c1558bd",
+    "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+    "140d02fe0712f4521765f56df50a36443c7b92367b4e333b312c12f39b02367c",
+    "bd9e73833f31aebb1adaa6ccf501566b76116447797619977e7dfe1bc908c3f4",
+    "cce149461de01dae9162f4b0e585d51b5804c2fc13d244e7e867001fbd0dd9d5",
+    "1887f0b82de4ff5de5b3907b05ad8b4ab549f8d9be2a84cb5dcfee90646195b2"
+  ],
+  "checkpoint_load_seconds": 0.030542594000053214,
+  "code_fingerprint": "8898d89de142b446d426428df09c2591b62ce5d6395ae445461eebdb23886568",
+  "code_revision": "4ffaf1da88f9092078d61ed3c801597eefcd0809",
+  "config": {
+    "batch_size": 2,
+    "checkpoint_every": 1,
+    "learning_rate": 0.0003,
+    "model": {
+      "block_size": 32,
+      "d_model": 32,
+      "dropout": 0.2,
+      "n_heads": 4,
+      "n_layers": 2,
+      "vocab_size": 257
+    },
+    "seed": 2712,
+    "steps": 6
+  },
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "control_seconds": 0.7357947249997778,
+  "data_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "digests": {
+    "logits": "38845b00fb723267967796f754dc1dfe0881cd50325cae917756002f5ea4c299",
+    "model": "6318a367b2d33101dea1003f1cca2731d63c142d41f59eb470c00f859303b119",
+    "optimizer": "291574f107c33f63b0e09f545588386f29269c1cf6c07bd809214b946c8c77da",
+    "rng": "a817f373a1886f450a5850c9448ed55440ac90b8219be51209b2c0f4d4a72483"
+  },
+  "equality": {
+    "batch_ids": true,
+    "cpu_rng": true,
+    "cuda_rng": true,
+    "cursor": true,
+    "logits": true,
+    "losses": true,
+    "model": true,
+    "optimizer": true,
+    "sample_ids": true,
+    "steps": true,
+    "tokens_seen": true
+  },
+  "evaluation": {
+    "available_documents": 61,
+    "available_target_tokens": 1196479,
+    "complete_split": false,
+    "data_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+    "evaluated_documents": 1,
+    "evaluated_target_tokens": 4096,
+    "mean_negative_log_likelihood": 5.475115444511175,
+    "model_state_digest": "6318a367b2d33101dea1003f1cca2731d63c142d41f59eb470c00f859303b119",
+    "perplexity": 238.67801940751656,
+    "schema_version": 1,
+    "split": "validation",
+    "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+    "total_negative_log_likelihood": 22426.072860717773,
+    "windows": 128
+  },
+  "evaluation_device": "cpu",
+  "exact_equality": true,
+  "execution": {
+    "compute_capability": [
+      7,
+      5
+    ],
+    "cublas_workspace_config": ":4096:8",
+    "cuda_version": "13.0",
+    "cudnn_benchmark": false,
+    "cudnn_version": 92000,
+    "deterministic_algorithms": true,
+    "deterministic_warn_only": false,
+    "device": "cuda:0",
+    "execution": "eager",
+    "gpu_name": "Tesla T4",
+    "initialization_dtype": "torch.float32",
+    "optimizer_policy": "AdamW foreach=False fused=False",
+    "precision": "float32",
+    "tf32": false,
+    "torch_version": "2.13.0+cu130",
+    "total_memory_bytes": 15637086208
+  },
+  "final_cursor": {
+    "batch_id": "ada47c7b9a9d5508fdb2e333d780e89870f9d32031b9bb0b170ebae62b1688cd",
+    "batch_index": 6,
+    "document_id": "062ffddb8e7197076c1428371d1586c8dae8bcf406a1307ac442f1ceae4b3621",
+    "epoch": 0,
+    "next_sample_ids": [
+      "062ffddb8e7197076c1428371d1586c8dae8bcf406a1307ac442f1ceae4b3621:000000000000",
+      "067e520336953a2f240096e2b95de1d84320d249721ed142c4a392320889f804:000000000000"
+    ],
+    "schema_version": 1,
+    "token_window_offset": 0
+  },
+  "final_generation": 6,
+  "interruption_step": 2,
+  "limitations": [
+    "Graceful same-runtime reconstruction on one CUDA device, not process death or SIGKILL.",
+    "Exact equality is confined to this GPU and execution contract, not cross-device parity.",
+    "FP32 eager execution; no mixed precision, distributed training or serving evidence.",
+    "Experiment-wide GPU peaks include checkpoint rollback and serialization staging.",
+    "Held-out byte metrics use a bounded deterministic prefix on CPU, not model-quality evidence.",
+    "Checkpoints are trusted local artifacts; SHA-256 is not authentication."
+  ],
+  "losses": [
+    5.569791793823242,
+    5.555881500244141,
+    5.473350524902344,
+    5.502934455871582,
+    5.46647834777832,
+    5.464766025543213
+  ],
+  "memory": {
+    "experiment_peak_allocated_bytes": 68169728,
+    "experiment_peak_reserved_bytes": 69206016
+  },
+  "recovered_seconds": 0.407582734000016,
+  "run_contract_fingerprint": "892a6d34eb6bd9886d8e54036c03520a1ab0f76407f4ae72ae1cef3f4dd11b2b",
+  "sample_ids": [
+    [
+      "0043fda28df9d758eaf5b9e7069f44fdfac6dc1f7defc6498ff8c13abd834ee5:000000000000",
+      "00bc54c6cb781e9ac346f5bf20520573419b92904fa45dea0cd445e3a0922ad6:000000000000"
+    ],
+    [
+      "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+      "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+    ],
+    [
+      "017ded8c419ba7853fed6e2475ae7f6aca9b50c36148e554ecbd7e9f796b2597:000000000000",
+      "01af394ef7f18c9c95045bb3215b1dd0d56dcb8efebe0d2a77a4459225226a2e:000000000000"
+    ],
+    [
+      "029854ecf627b10c166489b0818eac19a5823bc97f4773ab7a60ebcca74782a0:000000000000",
+      "02e8fe6c4dfa8e08cd2e1dccd664f7456103a771b9bbaa06964dddaa0eb8c19a:000000000000"
+    ],
+    [
+      "02f27d9da99e03a69331d0b13f67cdee42019660b54e046465e623777e45673b:000000000000",
+      "039cb38d5103816b5ae344c3f8547678fa783cb63cf4318cda8a387e7cf89556:000000000000"
+    ],
+    [
+      "03aaa603dcd9c96fecd6a482b59bf135b28f75938750c5d3379866d946ac279e:000000000000",
+      "05d8254f28b6e55127fcb7b1365a244be0c168c13124b77e0160d24af47d6153:000000000000"
+    ]
+  ],
+  "schema": "CudaRecoveryReportV1",
+  "selected_generation": 2,
+  "steps": 6,
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384
+}
