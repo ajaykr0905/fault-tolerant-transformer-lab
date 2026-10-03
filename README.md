@@ -108,6 +108,12 @@ cleanup, and explicitly defined timing boundaries. CI uses only the independent 
 this command acquires no data. See [the process-recovery operating instructions](docs/process-recovery.md)
 for all four boundaries, output handling, and what a paused-boundary kill does not prove.
 
+## Evaluate a checkpoint
+
+For checkpoint-bound validation or test loss, use
+[the held-out evaluation command](docs/evaluation.md). It includes short final windows,
+counts each next-byte target once and reports the exact evaluated subset.
+
 ## Live-feed capture, deterministic training
 
 Milestone 2 captures versioned USGS event records into a SQLite WAL ledger, deduplicates by

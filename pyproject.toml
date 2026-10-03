@@ -24,6 +24,7 @@ fttl-verify-recovery = "fttl.recovery_cli:main"
 fttl-recovery-matrix = "fttl.matrix_cli:main"
 fttl-capture-usgs = "fttl.usgs_cli:main"
 fttl-verify-process-recovery = "fttl.process_recovery_cli:main"
+fttl-evaluate-checkpoint = "fttl.evaluation_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
