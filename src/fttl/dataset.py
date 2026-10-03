@@ -359,7 +359,8 @@ def _read_gzip_records(path: Path) -> Iterator[Mapping[str, object]]:
     total_bytes = 0
     try:
         with gzip.open(path, "rb") as stream:
-            for line_number, raw_line in enumerate(stream, start=1):
+            bounded_lines = iter(lambda: stream.readline(MAX_DOCUMENT_BYTES + 1), b"")
+            for line_number, raw_line in enumerate(bounded_lines, start=1):
                 total_bytes += len(raw_line)
                 if total_bytes > MAX_UNCOMPRESSED_BYTES:
                     raise DatasetValidationError("uncompressed dataset exceeds the safety limit")
@@ -427,11 +428,20 @@ def _canonicalize_records(
 ) -> tuple[PreparedDocument, ...]:
     documents: list[PreparedDocument] = []
     seen_document_ids: set[str] = set()
+    total_normalized_bytes = 0
     for ordinal, record in enumerate(records, start=1):
         raw_text = record.get("text")
         if not isinstance(raw_text, str) or not raw_text.strip():
             raise DatasetValidationError(f"record {ordinal} has no non-empty text field")
         text = _normalize_text(raw_text)
+        text_bytes = text.encode("utf-8")
+        if len(text_bytes) > MAX_DOCUMENT_BYTES:
+            raise DatasetValidationError(
+                f"normalized document {ordinal} exceeds the per-document safety limit"
+            )
+        total_normalized_bytes += len(text_bytes)
+        if total_normalized_bytes > MAX_UNCOMPRESSED_BYTES:
+            raise DatasetValidationError("normalized dataset total exceeds the safety limit")
         source_id = _extract_source_id(record, text)
         document_id = stable_document_id(source_repository, source_id)
         if document_id in seen_document_ids:
@@ -443,7 +453,7 @@ def _canonicalize_records(
                 source_id=source_id,
                 split=split_for_document(document_id),
                 text=text,
-                text_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                text_sha256=hashlib.sha256(text_bytes).hexdigest(),
             )
         )
     return tuple(sorted(documents, key=lambda document: document.document_id))

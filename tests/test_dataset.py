@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 from pathlib import Path
 
 import pytest
 
+import fttl.dataset as dataset_module
 from fttl.dataset import (
     PEP_COMPRESSED_SHA256,
     PEP_DOCUMENT_COUNT,
@@ -21,6 +23,7 @@ from fttl.dataset import (
     Utf8ByteTokenizer,
     load_dataset_manifest,
     load_prepared_documents,
+    prepare_document_records,
     prepare_peps,
 )
 
@@ -235,6 +238,92 @@ def test_existing_output_must_match_the_requested_immutable_source(tmp_path: Pat
 
     with pytest.raises(DatasetValidationError, match="immutable source"):
         prepare_peps(tmp_path / "cache", output, source=different)
+
+
+@pytest.mark.parametrize("pipeline", ["gzip", "captured"])
+@pytest.mark.parametrize("limit", ["document", "total"])
+def test_ingestion_bounds_apply_after_unicode_normalization(
+    tmp_path: Path, monkeypatch, pipeline: str, limit: str
+):
+    # NFC expands U+0344 from two UTF-8 bytes into two combining marks (four bytes).
+    records = [{"id": "one", "text": "\u0344" * 64}]
+    if limit == "total":
+        records = [{"id": str(index), "text": "\u0344" * 32} for index in range(2)]
+    raw = b"".join(json.dumps(row, ensure_ascii=False).encode() + b"\n" for row in records)
+    archive = gzip.compress(raw, mtime=0) if pipeline == "gzip" else raw
+    source = DatasetSource(
+        repository="fttl://tests/normalization-bounds",
+        revision="fixture-v1",
+        path="records.jsonl.gz" if pipeline == "gzip" else "records.jsonl",
+        compressed_sha256=hashlib.sha256(archive).hexdigest(),
+        expected_document_count=len(records),
+        license="CC0-1.0",
+        license_limitations=(),
+        artifact_kind="gzip-jsonl" if pipeline == "gzip" else "sealed-jsonl",
+    )
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 200)
+    monkeypatch.setattr(dataset_module, "MAX_UNCOMPRESSED_BYTES", 240 if limit == "total" else 1000)
+    output = tmp_path / "prepared"
+    with pytest.raises(DatasetValidationError, match=f"normalized.*{limit}.*safety limit"):
+        if pipeline == "gzip":
+            prepare_peps(
+                tmp_path / "cache",
+                output,
+                source=source,
+                downloader=lambda _url, destination: destination.write_bytes(archive),
+            )
+        else:
+            artifact = tmp_path / "records.jsonl"
+            artifact.write_bytes(archive)
+            prepare_document_records(records, output, source_artifact=artifact, source=source)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".prepared.*"))
+
+
+def test_captured_text_limit_includes_required_terminal_newline(tmp_path: Path, monkeypatch):
+    records = [{"id": "one", "text": "1234"}]
+    artifact = tmp_path / "records.jsonl"
+    artifact.write_bytes(json.dumps(records).encode())
+    source = DatasetSource(
+        repository="fttl://tests/newline-boundary",
+        revision="fixture-v1",
+        path=artifact.name,
+        compressed_sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        expected_document_count=1,
+        license="CC0-1.0",
+        license_limitations=(),
+        artifact_kind="sealed-jsonl",
+    )
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 4)
+    with pytest.raises(DatasetValidationError, match="normalized.*document.*safety limit"):
+        prepare_document_records(
+            records, tmp_path / "rejected", source_artifact=artifact, source=source
+        )
+    assert not (tmp_path / "rejected").exists()
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 5)
+    manifest = prepare_document_records(
+        records, tmp_path / "accepted", source_artifact=artifact, source=source
+    )
+    assert manifest.counts["utf8_bytes"] == 5
+
+
+def test_gzip_reader_requests_bounded_lines(tmp_path: Path, monkeypatch):
+    requests = []
+
+    class BoundedStream(io.BytesIO):
+        def __iter__(self):
+            raise AssertionError("unbounded gzip line iteration")
+
+        def readline(self, size=-1):
+            requests.append(size)
+            assert size == 33
+            return super().readline(size)
+
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 32)
+    monkeypatch.setattr(gzip, "open", lambda *_args: BoundedStream(b"x" * 100))
+    with pytest.raises(DatasetValidationError, match="per-document safety limit"):
+        tuple(dataset_module._read_gzip_records(tmp_path / "source.gz"))
+    assert requests == [33]
 
 
 def _fingerprint_without_self(payload: dict[str, object]) -> str:
