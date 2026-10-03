@@ -1,4 +1,4 @@
-"""CPU consistency checks for a historical export, not GPU execution or authentication."""
+"""CPU consistency checks for historical exports, not GPU execution or authentication."""
 
 import hashlib
 import json
@@ -6,25 +6,46 @@ import math
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from fttl.config import ExperimentConfig
 from fttl.state import state_digest
 
 ROOT = Path(__file__).resolve().parents[1]
-REPORT = ROOT / "artifacts/colab-cuda-process-2026-10-04/cuda-process-recovery-report.json"
+EVIDENCE = ROOT / "artifacts/colab-cuda-process-2026-10-04"
 
 
-def test_published_cuda_process_report_preserves_export_and_recovery_contract():
-    exported = REPORT.read_bytes()
-    assert hashlib.sha256(exported).hexdigest() == (
-        "ee77c790103d13d145067570ab77d48c03a2428a048e9564c12552013b4ef8cd"
-    )
+@pytest.mark.parametrize(
+    "name,export_sha256,revision,verified_at_utc",
+    [
+        pytest.param(
+            "cuda-process-recovery-report.json",
+            "ee77c790103d13d145067570ab77d48c03a2428a048e9564c12552013b4ef8cd",
+            "8dd38161ea2563eb3fb82ee960c039141b00cae2",
+            "2026-10-03T22:21:44.234457+00:00",
+            id="original-8dd3816",
+        ),
+        pytest.param(
+            "cuda-process-recovery-report-65d2808.json",
+            "f3cd1f8cddbc4fb26e0446d1d704a02bc3b758e7e00fb03a361d8aa890e96ff3",
+            "65d280888e0f34aa9dc7107f8197dcef7f48fa34",
+            "2026-10-03T23:28:08.040536+00:00",
+            id="corrected-65d2808",
+        ),
+    ],
+)
+def test_published_cuda_process_report_preserves_export_and_recovery_contract(
+    name: str, export_sha256: str, revision: str, verified_at_utc: str
+):
+    exported = (EVIDENCE / name).read_bytes()
+    assert hashlib.sha256(exported).hexdigest() == export_sha256
     report = json.loads(exported)
     dataset = json.loads(
         (ROOT / "artifacts/peps-recovery-v0.2/dataset-manifest.json").read_text(encoding="utf-8")
     )
     assert report["schema"] == "CudaProcessRecoveryReportV1"
     # These identify the historical run, independently of the current checkout.
-    assert report["code_revision"] == "8dd38161ea2563eb3fb82ee960c039141b00cae2"
+    assert report["code_revision"] == revision
     assert report["code_fingerprint"] == (
         "0daa13b08c73f126acc052efc406b04a3adc0201762860b194b0cbb9be45c05b"
     )
@@ -161,7 +182,7 @@ def test_published_cuda_process_report_preserves_export_and_recovery_contract():
         "replayed durable save and CUDA synchronization"
         in (report["timing_boundaries"]["resume_spawn_to_replayed_commit_receipt"])
     )
-    assert report["verified_at_utc"] == "2026-10-03T22:21:44.234457+00:00"
+    assert report["verified_at_utc"] == verified_at_utc
     assert datetime.fromisoformat(report["verified_at_utc"]).utcoffset() == timedelta(0)
     limitations = " ".join(report["limitations"])
     for boundary in (
