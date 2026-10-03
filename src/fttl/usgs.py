@@ -94,6 +94,13 @@ def _reject_json_constant(value: str) -> None:
     raise USGSValidationError(f"non-finite JSON number {value!r} is not allowed")
 
 
+def _parse_finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise USGSValidationError(f"non-finite JSON number {value!r} is not allowed")
+    return number
+
+
 def _feed_identity(feed: str) -> tuple[str, str]:
     try:
         feed_url = USGS_FEEDS[feed]
@@ -113,6 +120,7 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
         decoded = json.loads(
             payload.decode("utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_json_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise USGSValidationError("USGS response is not valid UTF-8 JSON") from error
@@ -365,7 +373,11 @@ class USGSCaptureLedger:
                     "USGS ledger payload checksum does not match stored bytes"
                 )
             try:
-                feature = json.loads(payload_json, parse_constant=_reject_json_constant)
+                feature = json.loads(
+                    payload_json,
+                    parse_constant=_reject_json_constant,
+                    parse_float=_parse_finite_json_float,
+                )
             except json.JSONDecodeError as error:
                 raise USGSValidationError("USGS ledger payload is not valid JSON") from error
             version = parse_feature_collection(
@@ -482,6 +494,7 @@ def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
         raw = json.loads(
             manifest_path.read_text(encoding="utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_json_float,
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise USGSValidationError("USGS snapshot manifest is not valid UTF-8 JSON") from error
@@ -540,7 +553,11 @@ def load_snapshot(
     try:
         lines = content.decode("utf-8").splitlines()
         for line in lines:
-            record = json.loads(line, parse_constant=_reject_json_constant)
+            record = json.loads(
+                line,
+                parse_constant=_reject_json_constant,
+                parse_float=_parse_finite_json_float,
+            )
             if not isinstance(record, dict) or set(record) != {
                 "document_id",
                 "event_id",
@@ -564,7 +581,11 @@ def load_snapshot(
             if identity in identities:
                 raise USGSValidationError("USGS snapshot repeats an event version")
             identities.add(identity)
-            feature = json.loads(record["text"], parse_constant=_reject_json_constant)
+            feature = json.loads(
+                record["text"],
+                parse_constant=_reject_json_constant,
+                parse_float=_parse_finite_json_float,
+            )
             validated = parse_feature_collection(
                 _canonical_json({"type": "FeatureCollection", "features": [feature]}).encode(),
                 source=manifest.source,
