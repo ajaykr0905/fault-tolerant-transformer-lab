@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,18 @@ def _new_training_objects(config: ExperimentConfig, device: torch.device):
     return model, optimizer
 
 
-def _advance(model, optimizer, config, source, device, store, contract, end_step, payload=None):
+def _advance(
+    model,
+    optimizer,
+    config,
+    source,
+    device,
+    store,
+    contract,
+    end_step,
+    payload=None,
+    observer: Callable[[str, dict[str, Any]], None] | None = None,
+):
     step = 0 if payload is None else payload["step"]
     cursor = (
         source.initial_cursor()
@@ -70,6 +81,7 @@ def _advance(model, optimizer, config, source, device, store, contract, end_step
     require_finite_state(optimizer.state_dict(), "optimizer state")
     model.train()
     generation = 0
+    durable_step = step
     logits = None
     for step_index in range(step, end_step):
         batch = source.batch(cursor)
@@ -86,6 +98,17 @@ def _advance(model, optimizer, config, source, device, store, contract, end_step
         require_finite_state(model.state_dict(), "model state")
         require_finite_state(optimizer.state_dict(), "optimizer state")
         step = step_index + 1
+        if observer is not None:
+            observer(
+                "after-optimizer",
+                {
+                    "attempted_step": step,
+                    "durable_step": durable_step,
+                    "batch_id": batch.batch_id,
+                    "sample_ids": batch.sample_ids,
+                    "attempted_tokens": inputs.numel(),
+                },
+            )
         if step == end_step:
             model.eval()
             with torch.no_grad():
@@ -115,6 +138,9 @@ def _advance(model, optimizer, config, source, device, store, contract, end_step
                 rng_state=capture_cuda_rng_state(device),
             )
             generation = saved.generation
+            durable_step = step
+            if observer is not None:
+                observer("after-checkpoint", {"step": step, "generation": generation})
     assert logits is not None
     return {
         "model": _cpu_snapshot(model.state_dict()),

@@ -39,3 +39,7 @@ artifacts/peps-process-kill-2026-10-03/*/*
 !artifacts/colab-cuda-2026-10-03/
 artifacts/colab-cuda-2026-10-03/*
 !artifacts/colab-cuda-2026-10-03/cuda-recovery-report.json
+!artifacts/colab-cuda-process-2026-10-04/
+artifacts/colab-cuda-process-2026-10-04/*
+!artifacts/colab-cuda-process-2026-10-04/cuda-process-recovery-report.json
+!artifacts/colab-cuda-process-2026-10-04/cuda-process-recovery-report-65d2808.json
