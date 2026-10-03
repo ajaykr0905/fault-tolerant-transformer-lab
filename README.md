@@ -122,6 +122,26 @@ equality checks; the existing CPU recovery evidence is not relabeled as GPU evid
 The [first measured T4 report](artifacts/colab-cuda-2026-10-03/cuda-recovery-report.json)
 passes all 11 equality checks for six FP32 steps. This is same-process reconstruction, not GPU
 process-kill recovery. Use the [pinned Colab notebook](notebooks/colab_cuda_recovery.ipynb) to reproduce it.
+See the [Colab notebook and evidence](docs/colab-gpu-evidence.md) for the executed notebook link,
+report and access limitations; screenshot capture is not yet published.
+
+## Research references and upstream work
+
+This lab studies reliable training, not language-model quality. Its workload is an independently
+written, randomly initialized decoder-only Transformer; the PEP configuration has 34,720 parameters.
+It is not a pretrained Llama, Qwen or GPT model, and no paper's benchmark is reproduced here.
+
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762) supplies the conceptual Transformer
+  foundation. This decoder-only model is not a reproduction of the paper's encoder–decoder model.
+- [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685) is the
+  adapter reference. Current adapters are tested on a synthetic workload, not a fine-tuned
+  pretrained model or evidence of improved language quality.
+- [PyTorch's fault-tolerant Llama experiment](https://pytorch.org/blog/fault-tolerant-llama-training-with-2000-synthetic-failures-every-15-seconds-and-no-checkpoints-on-crusoe-l40s/)
+  and [TorchFT](https://docs.pytorch.org/torchft/) motivate the reliability direction. Their
+  distributed peer-recovery design and scale results are not implemented or claimed by this lab.
+
+See [the research basis and parallel upstream contributions](docs/research-basis.md) for the
+relationship between these references, this repository's own evidence and Ajay's upstream PRs.
 
 ## Live-feed capture, deterministic training
 

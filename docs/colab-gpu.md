@@ -62,6 +62,10 @@ allocated memory was 68,169,728 bytes; peak reserved memory was 69,206,016 bytes
 The export SHA-256 is `13dca14329edf830df3da6cafdeb69c0834ec7cbc71f1d4daa2daf3330324ffe`.
 These timings and memory measurements are one small correctness run, not performance claims.
 
+See the [notebook links and screenshot-capture status](colab-gpu-evidence.md).
+Sharing access to the executed notebook is unverified; the evidence page also links
+the public repository notebook for reproduction.
+
 A run only becomes GPU evidence after the real hardware tests and experiment complete, with actual
 hardware metadata, a clean pinned revision and all equality checks recorded. CPU-side mocks and
 skipped CUDA tests are not that evidence.

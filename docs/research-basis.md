@@ -4,6 +4,31 @@ This lab is independently implemented. The sources below motivated invariants an
 code was copied, no upstream benchmark was reproduced, and none of their scale results are claimed
 for this repository.
 
+## Model and adapter references
+
+- [Attention Is All You Need — Vaswani et al., 2017](https://arxiv.org/abs/1706.03762) introduces
+  the attention-based Transformer architecture. This lab uses those architectural concepts in an
+  independently written decoder-only `TinyTransformer`, not the paper's complete encoder–decoder
+  model or translation experiment. The PEP configuration starts from random weights and has
+  34,720 parameters; it does not load a pretrained foundation model.
+- [LoRA: Low-Rank Adaptation of Large Language Models — Hu et al., 2021](https://arxiv.org/abs/2106.09685)
+  motivates frozen base weights with trainable low-rank updates. The current implementation adds
+  adapters to attention projections and checks their mechanics on a synthetic CPU workload.
+  No pretrained model is currently fine-tuned here, and the comparison is not evidence of
+  downstream quality improvement. A pinned pretrained model and held-out evaluation remain a
+  separate, unfinished evidence gate.
+
+## Practical fault-tolerance reference
+
+[PyTorch's fault-tolerant Llama experiment — Rice and Huang, 2025](https://pytorch.org/blog/fault-tolerant-llama-training-with-2000-synthetic-failures-every-15-seconds-and-no-checkpoints-on-crusoe-l40s/)
+is an upstream systems experiment, not a paper whose results this lab reproduces. It demonstrates
+TorchFT/TorchTitan training under injected failures using distributed replica groups and live peer
+recovery. This lab instead verifies checkpoint/restart contracts on a small controlled workload.
+
+Its own [CPU process-kill proof](process-recovery.md) and [single-T4 reconstruction report](../artifacts/colab-cuda-2026-10-03/cuda-recovery-report.json)
+are separate evidence. The GPU run reconstructs fresh training objects in the same process; it is
+not GPU process-death recovery. No TorchFT integration or multi-worker execution is claimed.
+
 ## Engineering signals
 
 - [PyTorch on TorchFT and TorchTitan](https://x.com/PyTorch/status/1936131972285247504) shows why
@@ -22,7 +47,7 @@ supported only by its own tests and versioned artifacts.
 ## Repositories and incidents studied
 
 - [meta-pytorch/torchft](https://github.com/meta-pytorch/torchft) — per-step distributed recovery
-  concepts. This CPU lab does not claim TorchFT execution.
+  concepts. This lab does not claim TorchFT execution.
 - [pytorch/torchtitan](https://github.com/pytorch/torchtitan) — full training-system architecture,
   reproducibility, and checkpointing patterns.
 - [TorchTitan issue #3907](https://github.com/pytorch/torchtitan/issues/3907) — a second-resume bug
@@ -40,6 +65,25 @@ supported only by its own tests and versioned artifacts.
 
 These repositories are study references only. Stars were not applied automatically; that remains a
 user-controlled GitHub action.
+
+## Parallel upstream contributions
+
+Status checked on 3 October 2026. These are contributions to separate repositories, not features
+installed in this lab or evidence that an upstream maintainer endorsed its results.
+
+- [TorchTitan PR #4912 — Type decoder layer configurations](https://github.com/pytorch/torchtitan/pull/4912):
+  authored by `ajaykr0905`; open and unmerged at the status check.
+- [TorchTitan PR #4864 — Collect CPU-safe RL tests](https://github.com/pytorch/torchtitan/pull/4864):
+  authored by `ajaykr0905`; closed **without merging** on 2 October 2026. The maintainer superseded
+  it with [PR #4889](https://github.com/pytorch/torchtitan/pull/4889); that replacement is not
+  Ajay's merged contribution.
+- [Higgsfield skills PR #12 — Make frontmatter portable to Codex](https://github.com/higgsfield-ai/skills/pull/12):
+  authored by `ajaykr0905`; open and unmerged at the status check. This is skill/tooling
+  portability work, separate from the lab's training-recovery implementation.
+
+The studied [second-resume issue #3907](https://github.com/pytorch/torchtitan/issues/3907) was
+reported by another contributor. Its connection to this lab is the regression scenario, not
+authorship of the upstream report or fix. Live PR pages remain authoritative as statuses change.
 
 ## Learning progression
 
