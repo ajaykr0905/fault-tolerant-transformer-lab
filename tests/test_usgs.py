@@ -140,6 +140,44 @@ def test_sealed_snapshot_is_content_addressed_and_repeatable(tmp_path: Path):
     assert records[0]["document_id"].startswith(f"{SOURCE}:ci-event-alpha:")
 
 
+@pytest.mark.parametrize("corruption", ["content", "checksum", "event_id", "updated_at_ms"])
+def test_sealing_rejects_corrupt_ledger_rows_without_side_effects(tmp_path: Path, corruption: str):
+    output_dir = tmp_path / "snapshot"
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        ledger.capture(fixture_bytes(), feed="all-day", captured_at="2026-09-24T00:00:00Z")
+        payload_json, checksum = ledger.connection.execute(
+            "SELECT payload_json, payload_sha256 FROM event_versions WHERE event_id = ?",
+            ("ci-event-alpha",),
+        ).fetchone()
+        feature = json.loads(payload_json)
+        if corruption == "content":
+            feature["properties"]["mag"] = 9.9
+        elif corruption == "checksum":
+            checksum = "0" * 64
+        elif corruption == "event_id":
+            feature["id"] = "different-event"
+        else:
+            feature["properties"]["updated"] += 1
+        payload_json = json.dumps(
+            feature, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        if corruption in {"event_id", "updated_at_ms"}:
+            checksum = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        ledger.connection.execute(
+            "UPDATE event_versions SET payload_json = ?, payload_sha256 = ? WHERE event_id = ?",
+            (payload_json, checksum, "ci-event-alpha"),
+        )
+        ledger.connection.commit()
+
+        message = "checksum" if corruption in {"content", "checksum"} else "identity"
+        with pytest.raises(USGSValidationError, match=message):
+            ledger.seal_snapshot(output_dir, feed="all-day")
+
+        assert not output_dir.exists()
+        assert ledger.connection.execute("SELECT COUNT(*) FROM sealed_snapshots").fetchone()[0] == 0
+        assert ledger.connection.execute("SELECT COUNT(*) FROM polls").fetchone()[0] == 1
+
+
 def test_snapshot_bytes_are_independent_of_feed_record_order(tmp_path: Path):
     reversed_payload = json.loads(fixture_bytes())
     reversed_payload["features"].reverse()

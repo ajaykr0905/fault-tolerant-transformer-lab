@@ -349,7 +349,7 @@ class USGSCaptureLedger:
         source, feed_url = _feed_identity(feed)
         rows = self.connection.execute(
             """
-            SELECT event_id, updated_at_ms, payload_json
+            SELECT event_id, updated_at_ms, payload_json, payload_sha256
             FROM event_versions
             WHERE source = ? AND feed = ?
             ORDER BY event_id, updated_at_ms
@@ -358,16 +358,31 @@ class USGSCaptureLedger:
         ).fetchall()
         if not rows:
             raise ValueError("cannot seal an empty USGS capture ledger")
-        record_values = [
-            {
-                "document_id": f"{source}:{event_id}:{updated_at_ms}",
-                "event_id": event_id,
-                "source": source,
-                "text": payload_json,
-                "updated_at_ms": updated_at_ms,
-            }
-            for event_id, updated_at_ms, payload_json in rows
-        ]
+        record_values = []
+        for event_id, updated_at_ms, payload_json, payload_sha256 in rows:
+            if hashlib.sha256(payload_json.encode("utf-8")).hexdigest() != payload_sha256:
+                raise USGSValidationError(
+                    "USGS ledger payload checksum does not match stored bytes"
+                )
+            try:
+                feature = json.loads(payload_json, parse_constant=_reject_json_constant)
+            except json.JSONDecodeError as error:
+                raise USGSValidationError("USGS ledger payload is not valid JSON") from error
+            version = parse_feature_collection(
+                _canonical_json({"type": "FeatureCollection", "features": [feature]}).encode(),
+                source=source,
+            )[0]
+            if version.event_id != event_id or version.updated_at_ms != updated_at_ms:
+                raise USGSValidationError("USGS ledger payload identity does not match stored key")
+            record_values.append(
+                {
+                    "document_id": f"{source}:{event_id}:{updated_at_ms}",
+                    "event_id": event_id,
+                    "source": source,
+                    "text": payload_json,
+                    "updated_at_ms": updated_at_ms,
+                }
+            )
         content = (
             "\n".join(_canonical_json(record) for record in record_values) + "\n"
         ).encode("utf-8")
