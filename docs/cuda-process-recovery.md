@@ -8,6 +8,13 @@ published. The October 3 T4 report proves only same-process reconstruction.
 
 ## Run
 
+Open the [pinned process-recovery notebook](../notebooks/colab_cuda_process_recovery.ipynb)
+in Colab, select a free T4 GPU when available, and run its cells in order. It
+checks the actual hardware, refuses skipped GPU tests, and exports the report.
+The notebook pins implementation revision
+`8dd38161ea2563eb3fb82ee960c039141b00cae2`; it does not train whatever happens to
+be on a moving branch. The public notebook is unexecuted and is not GPU evidence.
+
 Use a free interactive Colab GPU or an existing Linux NVIDIA environment with
 the committed dependency lock. Prepare the public PEP dataset using the existing
 data command. In a fresh process, run:
