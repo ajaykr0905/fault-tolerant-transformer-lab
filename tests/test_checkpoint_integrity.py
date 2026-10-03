@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -221,7 +222,9 @@ def test_state_read_errors_use_integrity_fallback(
     assert (store / "LATEST").read_text().strip() == "generation-00000002"
 
 
-@pytest.mark.parametrize("invalid_component", ["model", "optimizer", "rng_state"])
+@pytest.mark.parametrize(
+    "invalid_component", ["model", "optimizer", "optimizer_container", "rng_state"]
+)
 def test_rejected_payload_preserves_caller_training_objects(tmp_path: Path, invalid_component):
     config = checkpoint_config()
     store = tmp_path / "checkpoints"
@@ -233,6 +236,8 @@ def test_rejected_payload_preserves_caller_training_objects(tmp_path: Path, inva
         payload["model"]["blocks.0.mlp.0.weight"] = torch.zeros(1)
     elif invalid_component == "optimizer":
         payload["optimizer"]["param_groups"] = []
+    elif invalid_component == "optimizer_container":
+        payload["optimizer"]["state"] = []
     else:
         payload["rng_state"]["torch_cpu"] = torch.zeros(1, dtype=torch.uint8)
     torch.save(payload, state_path)
@@ -242,8 +247,11 @@ def test_rejected_payload_preserves_caller_training_objects(tmp_path: Path, inva
     manifest["state_bytes"] = state_path.stat().st_size
     manifest_path.write_text(json.dumps(manifest))
     model, optimizer = model_and_optimizer(config)
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    optimizer.step()
     before_model = {name: value.clone() for name, value in model.state_dict().items()}
-    before_optimizer = optimizer.state_dict()
+    before_optimizer = copy.deepcopy(optimizer.state_dict())
     before_rng = capture_rng_state()
     with pytest.raises((CheckpointMismatchError, CheckpointIntegrityError)):
         load_checkpoint(store, model=model, optimizer=optimizer, expected_config=config)

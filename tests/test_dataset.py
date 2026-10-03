@@ -181,8 +181,7 @@ def test_rehashed_dataset_cannot_relabel_stable_document_identity(
         rows = [json.loads(line) for line in documents_path.read_text().splitlines()]
         rows[0]["source_id"] = "different-source-document"
         content = b"".join(
-            json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
-            for row in rows
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n" for row in rows
         )
         documents_path.write_bytes(content)
         manifest["documents"]["sha256"] = hashlib.sha256(content).hexdigest()

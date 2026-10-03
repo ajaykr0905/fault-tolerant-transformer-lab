@@ -24,7 +24,10 @@ loaded only after their surrounding contract is validated.
   and a durable, atomically replaced `LATEST` commit record.
 - Only committed generations are fallback candidates.
 - A damaged commit pointer fails closed; a save does not erase generations it cannot classify.
-- The two newest valid generations are retained so a corrupt newest state can fall back safely.
+- The two newest valid generations are retained so a newest generation with unreadable bytes,
+  invalid integrity metadata, or an undecodable payload can fall back safely. After selection,
+  model shape, optimizer restoration, or RNG semantic failures reject the load and restore the
+  caller; they do not retry an older generation.
 - Fresh training cannot overwrite a non-empty run directory.
 
 The explicit legacy-v1 migration does not have a sidecar length or digest. It accepts only the

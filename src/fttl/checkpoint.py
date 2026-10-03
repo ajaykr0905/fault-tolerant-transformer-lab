@@ -499,9 +499,7 @@ def save_checkpoint(
             raise ValueError("checkpoint cursor must be an object or null")
         json.dumps(cursor_value, allow_nan=False)
         batch_id_values = [str(value) for value in (batch_ids or [])]
-        sample_id_values = [
-            [str(sample_id) for sample_id in batch] for batch in (sample_ids or [])
-        ]
+        sample_id_values = [[str(sample_id) for sample_id in batch] for batch in (sample_ids or [])]
         loss_values = [float(loss) for loss in losses]
         json.dumps(loss_values, allow_nan=False)
     except (TypeError, ValueError, OverflowError) as error:
@@ -704,7 +702,7 @@ def load_checkpoint(
     try:
         model.load_state_dict(payload["model"])
         optimizer.load_state_dict(payload["optimizer"])
-    except (KeyError, TypeError, RuntimeError, ValueError) as error:
+    except Exception as error:
         rollback()
         raise CheckpointMismatchError(
             "checkpoint model or optimizer state does not match experiment"
