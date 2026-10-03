@@ -324,7 +324,11 @@ def _validate_generation_files(generation_dir: Path) -> CheckpointManifestV2:
         raise CheckpointIntegrityError("checkpoint state file is missing") from error
     if actual_length != manifest.state_bytes:
         raise CheckpointIntegrityError("checkpoint state byte length does not match manifest")
-    if _sha256(state_path) != manifest.state_sha256:
+    try:
+        actual_sha256 = _sha256(state_path)
+    except OSError as error:
+        raise CheckpointIntegrityError("checkpoint state file is unreadable") from error
+    if actual_sha256 != manifest.state_sha256:
         raise CheckpointIntegrityError("checkpoint state SHA-256 does not match manifest")
     return manifest
 

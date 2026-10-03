@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
+import fttl.checkpoint as checkpoint_module
 from fttl.checkpoint import (
     CheckpointIntegrityError,
     CheckpointMismatchError,
@@ -189,6 +190,34 @@ def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
             rtol=0,
             atol=0,
         )
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+@pytest.mark.parametrize("all_unreadable", [False, True])
+def test_state_read_errors_use_integrity_fallback(
+    tmp_path: Path, monkeypatch, error_type, all_unreadable: bool
+):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.125)
+    publish(store, config, step=2, marker=0.875)
+    original = checkpoint_module._sha256
+
+    def fail_read(path):
+        if all_unreadable or path.parent.name == "generation-00000002":
+            raise error_type("simulated state read failure")
+        return original(path)
+
+    monkeypatch.setattr(checkpoint_module, "_sha256", fail_read)
+    if all_unreadable:
+        with pytest.raises(CheckpointIntegrityError, match="no checkpoint generation"):
+            load(store, config)
+    else:
+        model, payload = load(store, config)
+        assert payload["step"] == payload["selected_generation"] == 1
+        for parameter in model.parameters():
+            torch.testing.assert_close(parameter, torch.full_like(parameter, 0.125), rtol=0, atol=0)
+    assert (store / "LATEST").read_text().strip() == "generation-00000002"
 
 
 def test_manifest_corruption_falls_back_and_allows_the_next_commit(tmp_path: Path):
