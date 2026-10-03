@@ -75,6 +75,21 @@ def test_utf8_byte_tokenizer_has_a_fixed_complete_byte_vocabulary():
     assert tokenizer.fingerprint() == TOKENIZER_FINGERPRINT
 
 
+@pytest.mark.parametrize("allow_end_of_document", [True, False])
+@pytest.mark.parametrize("token_id", [True, False, 256.0, 65.0, "65", None, -1, 257])
+def test_byte_decoder_rejects_invalid_token_types_and_values(token_id, allow_end_of_document):
+    with pytest.raises(DatasetValidationError, match="outside the byte vocabulary"):
+        Utf8ByteTokenizer().decode([token_id], allow_end_of_document=allow_end_of_document)
+
+
+def test_byte_decoder_preserves_valid_bytes_and_explicit_eod_policy():
+    tokenizer = Utf8ByteTokenizer()
+    assert tokenizer.decode([65, 0, 256, 66]) == "A\0B"
+    assert tokenizer.decode([65, 0, 66], allow_end_of_document=False) == "A\0B"
+    with pytest.raises(DatasetValidationError, match="outside the byte vocabulary"):
+        tokenizer.decode([65, 256], allow_end_of_document=False)
+
+
 def test_preparation_is_deterministic_and_splits_never_overlap(tmp_path: Path):
     output, first = _prepare_fixture(tmp_path / "first")
     _, second = _prepare_fixture(tmp_path / "second")

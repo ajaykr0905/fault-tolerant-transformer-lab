@@ -121,9 +121,13 @@ class Utf8ByteTokenizer:
     def decode(self, token_ids: Iterable[int], *, allow_end_of_document: bool = True) -> str:
         byte_values: list[int] = []
         for token_id in token_ids:
+            if isinstance(token_id, bool) or not isinstance(token_id, int):
+                raise DatasetValidationError(
+                    f"token id {token_id!r} is outside the byte vocabulary"
+                )
             if token_id == self.end_of_document_id and allow_end_of_document:
                 continue
-            if not isinstance(token_id, int) or not 0 <= token_id <= 255:
+            if not 0 <= token_id <= 255:
                 raise DatasetValidationError(f"token id {token_id!r} is outside the byte vocabulary")
             byte_values.append(token_id)
         return bytes(byte_values).decode("utf-8")
