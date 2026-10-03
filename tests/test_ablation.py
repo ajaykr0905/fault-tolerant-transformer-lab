@@ -39,7 +39,8 @@ def test_tuning_arms_replay_the_same_cpu_rng_and_dropout_sequence(monkeypatch, t
         dropout_states[mode] = []
 
         def record_dropout_rng(module, inputs):
-            dropout_states[mode].append(torch.get_rng_state().clone())
+            if module.training:
+                dropout_states[mode].append(torch.get_rng_state().clone())
 
         hooks = [
             module.register_forward_pre_hook(record_dropout_rng)

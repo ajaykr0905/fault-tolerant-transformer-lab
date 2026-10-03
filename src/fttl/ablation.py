@@ -14,6 +14,7 @@ from fttl.config import ExperimentConfig
 from fttl.data import batch_for_step, synthetic_token_stream
 from fttl.lora import inject_lora
 from fttl.model import TinyTransformer
+from fttl.numerical import require_finite_state
 from fttl.state import capture_rng_state, code_fingerprint, restore_rng_state
 from fttl.train import seed_everything
 
@@ -51,6 +52,8 @@ def _workload_token_count(config: ExperimentConfig) -> int:
 def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> TuningRun:
     parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate)
+    require_finite_state(model.state_dict(), "model state")
+    require_finite_state(optimizer.state_dict(), "optimizer state")
     token_count = _workload_token_count(config)
     tokens = synthetic_token_stream(token_count, config.model.vocab_size)
     losses: list[float] = []
@@ -61,10 +64,18 @@ def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> Tunin
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(inputs, targets)
         assert loss is not None
+        require_finite_state(loss, "training loss")
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0, error_if_nonfinite=True)
         optimizer.step()
+        require_finite_state(model.state_dict(), "model state")
+        require_finite_state(optimizer.state_dict(), "optimizer state")
         losses.append(float(loss.detach()))
+    model.eval()
+    verification_inputs, _ = batch_for_step(tokens, config, 0)
+    with torch.no_grad():
+        verification_logits, _ = model(verification_inputs)
+    require_finite_state(verification_logits, "final verification logits")
     return TuningRun(
         mode=mode,
         trainable_parameters=sum(parameter.numel() for parameter in parameters),

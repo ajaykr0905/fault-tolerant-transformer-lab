@@ -23,6 +23,7 @@ from fttl.data import (
     TrainingCursorV1,
 )
 from fttl.model import TinyTransformer
+from fttl.numerical import require_finite_state
 from fttl.state import capture_rng_state, code_fingerprint, git_revision, state_digest
 
 FailurePoint = Literal[
@@ -239,6 +240,8 @@ def run_training(
             raise ValueError("checkpoint sample history does not match its completed step")
         recovered_from_generation = int(payload.get("selected_generation", 0))
 
+    require_finite_state(model.state_dict(), "model state")
+    require_finite_state(optimizer.state_dict(), "optimizer state")
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / "checkpoints"
     final_step = min(
@@ -262,6 +265,7 @@ def run_training(
 
     started = time.perf_counter()
     checkpoint_generation = 0
+    final_logits: torch.Tensor | None = None
     model.train()
     for step_index in range(start_step, final_step):
         attempted_step = step_index + 1
@@ -281,6 +285,7 @@ def run_training(
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(prepared.inputs, prepared.targets)
         assert loss is not None
+        require_finite_state(loss, "training loss")
         loss.backward()
         if failure_point == "after-backward" and attempted_step == failure_step:
             _raise_injected(
@@ -293,8 +298,10 @@ def run_training(
                 observer=failure_observer,
             )
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0, error_if_nonfinite=True)
         optimizer.step()
+        require_finite_state(model.state_dict(), "model state")
+        require_finite_state(optimizer.state_dict(), "optimizer state")
         if failure_point == "after-optimizer" and attempted_step == failure_step:
             _raise_injected(
                 "after-optimizer",
@@ -305,6 +312,16 @@ def run_training(
                 attempted_tokens=attempted_tokens,
                 observer=failure_observer,
             )
+
+        if attempted_step == final_step:
+            model.eval()
+            try:
+                verification_batch = source.batch(source.initial_cursor())
+                with torch.no_grad():
+                    final_logits, _ = model(verification_batch.inputs)
+                require_finite_state(final_logits, "final verification logits")
+            finally:
+                model.train()
 
         losses.append(float(loss.detach()))
         batch_ids.append(prepared.batch_id)
@@ -366,9 +383,8 @@ def run_training(
     optimizer_digest = state_digest(optimizer.state_dict())
     rng_digest = state_digest(rng_state)
     model.eval()
-    verification_batch = source.batch(source.initial_cursor())
-    with torch.no_grad():
-        final_logits, _ = model(verification_batch.inputs)
+    assert final_logits is not None
+    require_finite_state(final_logits, "final verification logits")
     final_logits_digest = state_digest(final_logits)
     final_cursor = cursor.to_dict()
     final_state_digest = state_digest(
