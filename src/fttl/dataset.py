@@ -645,6 +645,12 @@ def _verify_prepared_documents(base_dir: Path, manifest: DatasetManifestV1) -> N
     _verify_file(documents_path, expected_hash, "prepared documents")
 
     documents = tuple(_iter_prepared_documents(documents_path))
+    for document in documents:
+        expected_id = stable_document_id(str(manifest.source["repository"]), document.source_id)
+        if document.document_id != expected_id:
+            raise DatasetValidationError(
+                "prepared stable document identity does not match its repository and source id"
+            )
     if len(documents) != manifest.counts.get("documents"):
         raise DatasetValidationError("prepared document count does not match manifest")
     expected_by_split = {

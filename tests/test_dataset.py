@@ -169,6 +169,33 @@ def test_changed_prepared_byte_is_rejected(tmp_path: Path):
         load_dataset_manifest(output)
 
 
+@pytest.mark.parametrize("identity_field", ["source_id", "repository"])
+def test_rehashed_dataset_cannot_relabel_stable_document_identity(
+    tmp_path: Path, identity_field: str
+):
+    output, _ = _prepare_fixture(tmp_path)
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if identity_field == "source_id":
+        documents_path = output / "documents.jsonl"
+        rows = [json.loads(line) for line in documents_path.read_text().splitlines()]
+        rows[0]["source_id"] = "different-source-document"
+        content = b"".join(
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            for row in rows
+        )
+        documents_path.write_bytes(content)
+        manifest["documents"]["sha256"] = hashlib.sha256(content).hexdigest()
+        manifest["documents"]["byte_length"] = len(content)
+    else:
+        manifest["source"]["repository"] = "fttl://tests/different-repository"
+    manifest["dataset_fingerprint"] = _fingerprint_without_self(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(DatasetValidationError, match="stable document identity"):
+        load_prepared_documents(output)
+
+
 def test_tokenizer_drift_and_split_overlap_are_rejected(tmp_path: Path):
     output, _ = _prepare_fixture(tmp_path)
     manifest_path = output / "manifest.json"
