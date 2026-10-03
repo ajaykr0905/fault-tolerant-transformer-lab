@@ -114,6 +114,15 @@ For checkpoint-bound validation or test loss, use
 [the held-out evaluation command](docs/evaluation.md). It includes short final windows,
 counts each next-byte target once and reports the exact evaluated subset.
 
+## Experimental NVIDIA GPU run
+
+For the first experimental single-NVIDIA-GPU checkpoint reconstruction, see the
+[Colab GPU runbook](docs/colab-gpu.md). It requires actual CUDA allocation and records hardware and
+equality checks; the existing CPU recovery evidence is not relabeled as GPU evidence.
+The [first measured T4 report](artifacts/colab-cuda-2026-10-03/cuda-recovery-report.json)
+passes all 11 equality checks for six FP32 steps. This is same-process reconstruction, not GPU
+process-kill recovery. Use the [pinned Colab notebook](notebooks/colab_cuda_recovery.ipynb) to reproduce it.
+
 ## Live-feed capture, deterministic training
 
 Milestone 2 captures versioned USGS event records into a SQLite WAL ledger, deduplicates by
@@ -168,8 +177,8 @@ for the exact state machine and threat model.
 ## Evidence boundary
 
 This release proves deterministic recovery for a small, pinned CPU run. It does **not** prove model
-quality, pretrained-model fine-tuning, GPU behavior, simultaneous multi-worker training, distributed
-scale, production readiness, or a service-level recovery objective. The original matrix uses
+quality, pretrained-model fine-tuning, GPU process-death recovery, simultaneous multi-worker training,
+distributed scale, production readiness, or a service-level recovery objective. The original matrix uses
 deterministic Python exceptions. The additional process verifier sends real `SIGKILL` to one paused
 worker at a selected boundary; the OS and filesystem remain running. Arbitrary asynchronous kills,
 filesystem faults, and physical power loss are not covered.
@@ -185,7 +194,7 @@ the payload and manifest.
 
 1. Arbitrary asynchronous kills, filesystem fault injection, and power-loss durability evidence.
 2. A pinned pretrained model with a real LoRA evaluation and retention checks.
-3. Actual GPU evidence with hardware and memory measurements.
+3. GPU process-death recovery and larger profiled workloads beyond the six-step reconstruction check.
 4. Multi-process PyTorch Distributed Checkpoint or TorchFT experiments.
 5. Authenticated checkpoint manifests and remote object-store publication.
 
