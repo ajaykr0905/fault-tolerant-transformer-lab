@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import replace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -211,24 +212,39 @@ def test_advance_observer_pauses_before_second_checkpoint_on_cpu_unit_only(tmp_p
     model, optimizer = cuda_recovery._new_training_objects(config, torch.device("cpu"))
     events = []
     monkeypatch.setattr(cuda_recovery, "capture_cuda_rng_state", lambda device: capture_rng_state())
+    monkeypatch.setattr(
+        torch.accelerator, "current_accelerator", lambda check_available=False: torch.device("cuda")
+    )
+
+    def unexpected_stream_query(*args, **kwargs):
+        raise AssertionError("CPU observer queried an accelerator stream")
+
+    monkeypatch.setattr(torch.accelerator, "current_stream", unexpected_stream_query)
 
     def observe(event, values):
         events.append((event, values))
         if event == "after-optimizer" and values["attempted_step"] == 2:
             raise RuntimeError("unit boundary reached")
 
-    with pytest.raises(RuntimeError, match="unit boundary reached"):
-        cuda_recovery._advance(
-            model,
-            optimizer,
-            config,
-            source,
-            torch.device("cpu"),
-            tmp_path / "checkpoints",
-            "observer-unit-only",
-            config.steps,
-            observer=observe,
-        )
+    simulated_accelerator = torch.accelerator.current_accelerator
+    # AdamW discovers accelerators even for CPU parameters. Isolate this CPU
+    # unit only; real CUDA execution keeps the accelerator runtime checks.
+    with patch.object(torch.accelerator, "current_accelerator", return_value=None) as discovery:
+        with pytest.raises(RuntimeError, match="unit boundary reached"):
+            cuda_recovery._advance(
+                model,
+                optimizer,
+                config,
+                source,
+                torch.device("cpu"),
+                tmp_path / "checkpoints",
+                "observer-unit-only",
+                config.steps,
+                observer=observe,
+            )
+    assert discovery.call_count == 2
+    assert all(call.kwargs == {"check_available": True} for call in discovery.call_args_list)
+    assert torch.accelerator.current_accelerator is simulated_accelerator
     assert [event for event, _ in events] == [
         "after-optimizer",
         "after-checkpoint",
@@ -264,11 +280,54 @@ def test_module_help_does_not_initialize_cuda():
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX SIGKILL")
 def test_real_cuda_sigkill_replays_failed_batch_and_preserves_full_state(tmp_path, monkeypatch):
     monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-    report = recovery.verify_cuda_process_recovery(
-        real_data_config(),
-        tmp_path / "run",
-        dataset_manifest=prepared_fixture(tmp_path / "dataset"),
+    config_path = tmp_path / "config.json"
+    config_path.write_text(real_data_config().canonical_json(), encoding="utf-8")
+    manifest = prepared_fixture(tmp_path / "dataset")
+    # Other tests may initialize CUDA in pytest. The public CLI must have its
+    # own fresh CPU parent, just as it does in the operating notebook.
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fttl.cuda_process_recovery",
+            "--config",
+            str(config_path),
+            "--dataset-manifest",
+            str(manifest),
+            "--output",
+            str(tmp_path / "run"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
+    raw = (tmp_path / "run" / "cuda-process-recovery-report.json").read_text(encoding="utf-8")
+    report = json.loads(raw)
+    assert set(report["equality"]) == {
+        "model",
+        "optimizer",
+        "rng",
+        "logits",
+        "steps",
+        "tokens_seen",
+        "losses",
+        "batch_ids",
+        "sample_ids",
+        "cursor",
+        "generation",
+        "replay_execution_contract",
+        "completion_execution_contract",
+        "final_checkpoint_model",
+        "final_checkpoint_optimizer",
+        "final_checkpoint_rng",
+        "parent_cuda_uninitialized",
+        "dataset_contract",
+        "completion_selected_step",
+        "completion_worker_pid",
+        "independent_worker_pids",
+        "expected_completed_state",
+    }
     assert report["exact_equality"] and all(report["equality"].values())
     assert report["interrupted_exitcode"] == -signal.SIGKILL
     assert len(set(report["worker_pids"].values())) == 4
@@ -279,7 +338,6 @@ def test_real_cuda_sigkill_replays_failed_batch_and_preserves_full_state(tmp_pat
     assert report["steps"] == 4 and report["tokens_seen"] == 64
     assert report["execution"]["device"] == "cuda:0"
     assert report["timings_seconds"]["resume_spawn_to_replayed_commit_receipt"] > 0
-    assert not torch.cuda.is_initialized()
-    raw = (tmp_path / "run" / "cuda-process-recovery-report.json").read_text(encoding="utf-8")
+    assert report["equality"]["parent_cuda_uninitialized"] is True
     assert str(tmp_path) not in raw
-    assert json.loads(raw) == report
+    assert json.loads(completed.stdout) == report
