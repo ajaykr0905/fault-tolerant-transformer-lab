@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+import pytest
 import torch
 
 from fttl.state import capture_rng_state, restore_rng_state, state_digest, state_trees_equal
@@ -19,6 +20,27 @@ def test_rng_state_round_trip_replays_python_numpy_and_torch():
     assert actual[0] == expected[0]
     assert actual[1] == expected[1]
     assert torch.equal(actual[2], expected[2])
+
+
+@pytest.mark.parametrize("component", ["python", "numpy", "torch_cpu"])
+def test_invalid_rng_restore_preserves_all_global_generators(component):
+    random.seed(456)
+    np.random.seed(456)
+    torch.manual_seed(456)
+    invalid = capture_rng_state()
+    if component == "python":
+        invalid[component] = [99, [], None]
+    elif component == "numpy":
+        invalid[component]["bit_generator"] = "INVALID"
+    else:
+        invalid[component] = torch.zeros(1, dtype=torch.uint8)
+    random.seed(123)
+    np.random.seed(123)
+    torch.manual_seed(123)
+    before = capture_rng_state()
+    with pytest.raises((ValueError, RuntimeError)):
+        restore_rng_state(invalid)
+    assert state_trees_equal(before, capture_rng_state())
 
 
 def test_state_digest_is_stable_and_sensitive_to_tensor_bytes():

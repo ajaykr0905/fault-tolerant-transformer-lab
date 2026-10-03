@@ -77,17 +77,21 @@ def capture_rng_state() -> dict[str, Any]:
 
 
 def restore_rng_state(state: Mapping[str, Any]) -> None:
-    random.setstate(_tuple_tree(state["python"]))
+    """Validate every CPU RNG state before changing any global generator."""
+    python_state = _tuple_tree(state["python"])
     numpy_state = state["numpy"]
-    np.random.set_state(
-        (
-            str(numpy_state["bit_generator"]),
-            np.asarray(numpy_state["keys"], dtype=np.uint32),
-            int(numpy_state["position"]),
-            int(numpy_state["has_gauss"]),
-            float(numpy_state["cached_gaussian"]),
-        )
+    numpy_candidate = (
+        str(numpy_state["bit_generator"]),
+        np.asarray(numpy_state["keys"], dtype=np.uint32),
+        int(numpy_state["position"]),
+        int(numpy_state["has_gauss"]),
+        float(numpy_state["cached_gaussian"]),
     )
+    random.Random().setstate(python_state)
+    np.random.RandomState().set_state(numpy_candidate)
+    torch.Generator(device="cpu").set_state(state["torch_cpu"])
+    random.setstate(python_state)
+    np.random.set_state(numpy_candidate)
     torch.set_rng_state(state["torch_cpu"])
 
 
