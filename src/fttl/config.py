@@ -2,8 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+def _require_integer(name: str, value: int, minimum: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise ValueError(f"{name} must be an integer greater than or equal to {minimum}")
+
+
+def _require_finite_number(name: str, value: float) -> None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError(f"{name} must be a finite number")
 
 
 @dataclass(frozen=True)
@@ -16,14 +33,14 @@ class ModelConfig:
     dropout: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.vocab_size < 2:
-            raise ValueError("vocab_size must be at least 2")
-        if self.block_size < 2:
-            raise ValueError("block_size must be at least 2")
-        if self.d_model < 4 or self.d_model % self.n_heads != 0:
+        _require_integer("vocab_size", self.vocab_size, 2)
+        _require_integer("block_size", self.block_size, 2)
+        _require_integer("d_model", self.d_model, 4)
+        _require_integer("n_heads", self.n_heads, 1)
+        _require_integer("n_layers", self.n_layers, 1)
+        if self.d_model % self.n_heads != 0:
             raise ValueError("d_model must be at least 4 and divisible by n_heads")
-        if self.n_layers < 1:
-            raise ValueError("n_layers must be at least 1")
+        _require_finite_number("dropout", self.dropout)
         if not 0 <= self.dropout < 1:
             raise ValueError("dropout must be in [0, 1)")
 
@@ -38,14 +55,15 @@ class ExperimentConfig:
     checkpoint_every: int = 4
 
     def __post_init__(self) -> None:
-        if self.steps < 1:
-            raise ValueError("steps must be at least 1")
-        if self.batch_size < 1:
-            raise ValueError("batch_size must be at least 1")
+        _require_integer("seed", self.seed, 0)
+        if self.seed >= 2**32:
+            raise ValueError("seed must be less than 2**32 for NumPy seeding")
+        _require_integer("steps", self.steps, 1)
+        _require_integer("batch_size", self.batch_size, 1)
+        _require_integer("checkpoint_every", self.checkpoint_every, 1)
+        _require_finite_number("learning_rate", self.learning_rate)
         if self.learning_rate <= 0:
             raise ValueError("learning_rate must be greater than zero")
-        if self.checkpoint_every < 1:
-            raise ValueError("checkpoint_every must be at least 1")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
