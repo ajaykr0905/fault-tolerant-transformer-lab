@@ -20,6 +20,8 @@ uninterrupted control.
   fallback from a corrupt newest generation.
 - Exact CPU equality after failures before forward, after backward, after optimizer update, and
   during checkpoint publication.
+- Parent-controlled POSIX `SIGKILL` at those four boundaries, with independently spawned control,
+  interrupted, replay, and completion workers and exact state comparisons.
 - Original run, resume, save, and second-resume regression coverage.
 - Dataset, tokenizer, configuration, code, run-contract, and final-state fingerprints.
 - A bounded USGS earthquake-feed capture ledger that seals immutable snapshots for the same
@@ -82,6 +84,30 @@ uv run fttl-recovery-matrix \
   --output artifacts/local-peps-matrix
 ```
 
+## Prove recovery after an OS-process kill
+
+On a POSIX system, the parent waits for a deterministic step-2 boundary and sends `SIGKILL`
+to the training worker. A fresh process loads durable step 1, replays the failed batch,
+and commits it before another fresh process completes training. The verifier compares
+the result with an independently spawned uninterrupted control.
+
+After preparing the dataset above:
+
+```bash
+uv run --frozen fttl-verify-process-recovery \
+  --config configs/peps-cpu.json \
+  --dataset-manifest .cache/fttl/peps-v1/manifest.json \
+  --failure-point during-checkpoint-write \
+  --timeout-seconds 60 \
+  --output artifacts/local-peps-process-kill
+```
+
+Each worker has a bounded deadline and is reaped on success or failure. The report records
+signal exit status, selected generation, failed/replayed sample IDs, exact equality, staging
+cleanup, and explicitly defined timing boundaries. CI uses only the independent CC0 fixture;
+this command acquires no data. See [the process-recovery operating instructions](docs/process-recovery.md)
+for all four boundaries, output handling, and what a paused-boundary kill does not prove.
+
 ## Live-feed capture, deterministic training
 
 Milestone 2 captures versioned USGS event records into a SQLite WAL ledger, deduplicates by
@@ -126,6 +152,7 @@ for the exact state machine and threat model.
 - `src/fttl/train.py` — transaction boundary, controlled interruption, and run fingerprints.
 - `src/fttl/checkpoint.py` — generation-based durable publication and integrity validation.
 - `src/fttl/recovery.py` — repeated-restart proof and `RecoveryReportV1`.
+- `src/fttl/process_recovery.py` — spawned-worker SIGKILL proof and `ProcessRecoveryReportV1`.
 - `src/fttl/matrix.py` — four failure scenarios plus incompatibility/corruption checks.
 - `src/fttl/usgs.py` — bounded capture, SQLite ledger, sealed snapshot, and dataset adapter.
 - `artifacts/peps-recovery-v0.2/` — public-safe manifests and reports; no binary checkpoints.
@@ -135,9 +162,11 @@ for the exact state machine and threat model.
 ## Evidence boundary
 
 This release proves deterministic recovery for a small, pinned CPU run. It does **not** prove model
-quality, pretrained-model fine-tuning, GPU behavior, multi-process recovery, distributed scale,
-production readiness, or a service-level recovery objective. Failure injection uses deterministic
-Python exceptions; OS-kill and power-loss testing are later gates.
+quality, pretrained-model fine-tuning, GPU behavior, simultaneous multi-worker training, distributed
+scale, production readiness, or a service-level recovery objective. The original matrix uses
+deterministic Python exceptions. The additional process verifier sends real `SIGKILL` to one paused
+worker at a selected boundary; the OS and filesystem remain running. Arbitrary asynchronous kills,
+filesystem faults, and physical power loss are not covered.
 
 The existing LoRA experiment compares adapter mechanics under a controlled synthetic workload. It
 is not evidence that a pretrained model improved.
@@ -148,7 +177,7 @@ the payload and manifest.
 
 ## Next evidence gates
 
-1. OS-process kill and filesystem fault injection.
+1. Arbitrary asynchronous kills, filesystem fault injection, and power-loss durability evidence.
 2. A pinned pretrained model with a real LoRA evaluation and retention checks.
 3. Actual GPU evidence with hardware and memory measurements.
 4. Multi-process PyTorch Distributed Checkpoint or TorchFT experiments.

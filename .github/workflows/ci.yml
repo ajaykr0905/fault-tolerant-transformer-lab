@@ -48,6 +48,9 @@ jobs:
           uv run --frozen pytest
           tests/test_real_data_recovery.py::test_complete_matrix_is_public_safe_and_passes_all_scenarios
 
+      - name: Prove spawned-worker SIGKILL recovery without network access
+        run: uv run --frozen pytest tests/test_process_recovery.py
+
       - name: Exercise synthetic command-line paths
         run: |
           uv run --frozen fttl-train-smoke \
