@@ -109,6 +109,68 @@ def test_manifest_binds_generation_state_and_inputs(tmp_path: Path):
     assert manifest.tokenizer_fingerprint == "utf8-byte-v1"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("step", 1.5),
+        ("step", True),
+        ("step", -1),
+        ("tokens_seen", 12.5),
+        ("tokens_seen", False),
+        ("retention", 2.5),
+        ("retention", True),
+        ("retention", 1),
+        ("cursor", ["unexpected"]),
+        ("cursor", {"offset": float("nan")}),
+        ("data_fingerprint", 123),
+        ("tokenizer_fingerprint", True),
+        ("run_contract_fingerprint", ""),
+    ],
+)
+def test_invalid_save_metadata_preserves_store(tmp_path: Path, field, value):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    before = {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    model, optimizer = model_and_optimizer(config)
+    arguments = dict(
+        step=2,
+        tokens_seen=24,
+        losses=[2.0, 1.0],
+        cursor={"batch_id": 2},
+        data_fingerprint="dataset-a",
+        tokenizer_fingerprint="utf8-byte-v1",
+    )
+    arguments[field] = value
+    with pytest.raises(ValueError):
+        save_checkpoint(store, model=model, optimizer=optimizer, config=config, **arguments)
+    after = {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert load(store, config)[1]["step"] == 1
+
+
+def test_invalid_cursor_does_not_create_store(tmp_path: Path):
+    config = checkpoint_config()
+    model, optimizer = model_and_optimizer(config)
+    store = tmp_path / "missing"
+    with pytest.raises(ValueError, match="cursor"):
+        save_checkpoint(
+            store,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            step=0,
+            tokens_seen=0,
+            losses=[],
+            cursor=["unexpected"],
+        )
+    assert not store.exists()
+
+
 def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
     config = checkpoint_config()
     store = tmp_path / "checkpoints"
