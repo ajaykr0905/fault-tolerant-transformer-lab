@@ -562,10 +562,22 @@ def _validate_manifest_contract(manifest: DatasetManifestV1) -> None:
         raise DatasetValidationError("tokenizer vocabulary size drift detected")
     if manifest.tokenizer.get("end_of_document_id") != TOKENIZER_EOD_ID:
         raise DatasetValidationError("tokenizer end-of-document id drift detected")
+    expected_tokenizer = {**TOKENIZER_SPEC, "fingerprint": TOKENIZER_FINGERPRINT}
+    if _canonical_json_bytes(manifest.tokenizer) != _canonical_json_bytes(expected_tokenizer):
+        raise DatasetValidationError(
+            "tokenizer specification does not match the supported contract"
+        )
     if manifest.preprocessing.get("name") != PREPROCESSING_NAME:
         raise DatasetValidationError("unsupported preprocessing identity")
     if manifest.preprocessing.get("fingerprint") != PREPROCESSING_FINGERPRINT:
         raise DatasetValidationError("preprocessing fingerprint drift detected")
+    expected_preprocessing = {**PREPROCESSING_SPEC, "fingerprint": PREPROCESSING_FINGERPRINT}
+    if _canonical_json_bytes(manifest.preprocessing) != _canonical_json_bytes(
+        expected_preprocessing
+    ):
+        raise DatasetValidationError(
+            "preprocessing specification does not match the supported contract"
+        )
 
     if set(manifest.splits) != {"train", "validation", "test"}:
         raise DatasetValidationError("manifest must define train, validation, and test splits")

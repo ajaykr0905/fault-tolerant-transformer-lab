@@ -178,6 +178,41 @@ def test_tokenizer_drift_and_split_overlap_are_rejected(tmp_path: Path):
         load_dataset_manifest(manifest_path)
 
 
+@pytest.mark.parametrize(
+    "component, field, value",
+    [
+        ("tokenizer", "byte_ids", [1, 255]),
+        ("tokenizer", "byte_ids", [False, 255]),
+        ("tokenizer", "vocab_size", 257.0),
+        ("tokenizer", "text_encoding", "UTF-16"),
+        ("tokenizer", "text_encoding", None),
+        ("tokenizer", "unknown_option", "enabled"),
+        ("preprocessing", "unicode_normalization", "NFD"),
+        ("preprocessing", "newlines", "CRLF"),
+        ("preprocessing", "document_order", "source order"),
+        ("preprocessing", "split", "random"),
+        ("preprocessing", "unicode_normalization", None),
+        ("preprocessing", "unknown_option", "enabled"),
+    ],
+)
+def test_manifest_rejects_noncanonical_component_declarations_before_data_access(
+    tmp_path: Path, component: str, field: str, value: object
+):
+    output, _ = _prepare_fixture(tmp_path)
+    manifest_path = output / "manifest.json"
+    altered = json.loads(manifest_path.read_text())
+    if value is None:
+        altered[component].pop(field)
+    else:
+        altered[component][field] = value
+    altered["dataset_fingerprint"] = _fingerprint_without_self(altered)
+    manifest_path.write_text(json.dumps(altered), encoding="utf-8")
+    (output / "documents.jsonl").unlink()
+
+    with pytest.raises(DatasetValidationError, match=f"{component} specification"):
+        load_dataset_manifest(manifest_path)
+
+
 def test_loaded_documents_have_stable_ids_and_default_to_train(tmp_path: Path):
     output, _ = _prepare_fixture(tmp_path)
     train_documents = load_prepared_documents(output)
