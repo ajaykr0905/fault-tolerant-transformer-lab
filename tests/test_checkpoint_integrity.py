@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
+import fttl.checkpoint as checkpoint_module
 from fttl.checkpoint import (
     CheckpointIntegrityError,
     CheckpointMismatchError,
@@ -15,6 +17,7 @@ from fttl.checkpoint import (
 )
 from fttl.config import ExperimentConfig, ModelConfig
 from fttl.model import TinyTransformer
+from fttl.state import capture_rng_state, state_trees_equal
 
 
 def checkpoint_config() -> ExperimentConfig:
@@ -109,6 +112,68 @@ def test_manifest_binds_generation_state_and_inputs(tmp_path: Path):
     assert manifest.tokenizer_fingerprint == "utf8-byte-v1"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("step", 1.5),
+        ("step", True),
+        ("step", -1),
+        ("tokens_seen", 12.5),
+        ("tokens_seen", False),
+        ("retention", 2.5),
+        ("retention", True),
+        ("retention", 1),
+        ("cursor", ["unexpected"]),
+        ("cursor", {"offset": float("nan")}),
+        ("data_fingerprint", 123),
+        ("tokenizer_fingerprint", True),
+        ("run_contract_fingerprint", ""),
+    ],
+)
+def test_invalid_save_metadata_preserves_store(tmp_path: Path, field, value):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.25)
+    before = {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    model, optimizer = model_and_optimizer(config)
+    arguments = dict(
+        step=2,
+        tokens_seen=24,
+        losses=[2.0, 1.0],
+        cursor={"batch_id": 2},
+        data_fingerprint="dataset-a",
+        tokenizer_fingerprint="utf8-byte-v1",
+    )
+    arguments[field] = value
+    with pytest.raises(ValueError):
+        save_checkpoint(store, model=model, optimizer=optimizer, config=config, **arguments)
+    after = {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert load(store, config)[1]["step"] == 1
+
+
+def test_invalid_cursor_does_not_create_store(tmp_path: Path):
+    config = checkpoint_config()
+    model, optimizer = model_and_optimizer(config)
+    store = tmp_path / "missing"
+    with pytest.raises(ValueError, match="cursor"):
+        save_checkpoint(
+            store,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            step=0,
+            tokens_seen=0,
+            losses=[],
+            cursor=["unexpected"],
+        )
+    assert not store.exists()
+
+
 def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
     config = checkpoint_config()
     store = tmp_path / "checkpoints"
@@ -127,6 +192,72 @@ def test_corrupt_newest_generation_falls_back_to_previous(tmp_path: Path):
             rtol=0,
             atol=0,
         )
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+@pytest.mark.parametrize("all_unreadable", [False, True])
+def test_state_read_errors_use_integrity_fallback(
+    tmp_path: Path, monkeypatch, error_type, all_unreadable: bool
+):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.125)
+    publish(store, config, step=2, marker=0.875)
+    original = checkpoint_module._sha256
+
+    def fail_read(path):
+        if all_unreadable or path.parent.name == "generation-00000002":
+            raise error_type("simulated state read failure")
+        return original(path)
+
+    monkeypatch.setattr(checkpoint_module, "_sha256", fail_read)
+    if all_unreadable:
+        with pytest.raises(CheckpointIntegrityError, match="no checkpoint generation"):
+            load(store, config)
+    else:
+        model, payload = load(store, config)
+        assert payload["step"] == payload["selected_generation"] == 1
+        for parameter in model.parameters():
+            torch.testing.assert_close(parameter, torch.full_like(parameter, 0.125), rtol=0, atol=0)
+    assert (store / "LATEST").read_text().strip() == "generation-00000002"
+
+
+@pytest.mark.parametrize(
+    "invalid_component", ["model", "optimizer", "optimizer_container", "rng_state"]
+)
+def test_rejected_payload_preserves_caller_training_objects(tmp_path: Path, invalid_component):
+    config = checkpoint_config()
+    store = tmp_path / "checkpoints"
+    publish(store, config, step=1, marker=0.125)
+    generation = store / "generation-00000001"
+    state_path = generation / "state.pt"
+    payload = torch.load(state_path, weights_only=True)
+    if invalid_component == "model":
+        payload["model"]["blocks.0.mlp.0.weight"] = torch.zeros(1)
+    elif invalid_component == "optimizer":
+        payload["optimizer"]["param_groups"] = []
+    elif invalid_component == "optimizer_container":
+        payload["optimizer"]["state"] = []
+    else:
+        payload["rng_state"]["torch_cpu"] = torch.zeros(1, dtype=torch.uint8)
+    torch.save(payload, state_path)
+    manifest_path = generation / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["state_sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+    manifest["state_bytes"] = state_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest))
+    model, optimizer = model_and_optimizer(config)
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    optimizer.step()
+    before_model = {name: value.clone() for name, value in model.state_dict().items()}
+    before_optimizer = copy.deepcopy(optimizer.state_dict())
+    before_rng = capture_rng_state()
+    with pytest.raises((CheckpointMismatchError, CheckpointIntegrityError)):
+        load_checkpoint(store, model=model, optimizer=optimizer, expected_config=config)
+    assert state_trees_equal(before_model, model.state_dict())
+    assert state_trees_equal(before_optimizer, optimizer.state_dict())
+    assert state_trees_equal(before_rng, capture_rng_state())
 
 
 def test_manifest_corruption_falls_back_and_allows_the_next_commit(tmp_path: Path):

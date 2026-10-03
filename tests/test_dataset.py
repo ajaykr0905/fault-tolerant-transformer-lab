@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 from pathlib import Path
 
 import pytest
 
+import fttl.dataset as dataset_module
 from fttl.dataset import (
     PEP_COMPRESSED_SHA256,
     PEP_DOCUMENT_COUNT,
@@ -21,6 +23,7 @@ from fttl.dataset import (
     Utf8ByteTokenizer,
     load_dataset_manifest,
     load_prepared_documents,
+    prepare_document_records,
     prepare_peps,
 )
 
@@ -70,6 +73,21 @@ def test_utf8_byte_tokenizer_has_a_fixed_complete_byte_vocabulary():
     assert tokenizer.decode(tokenizer.encode(text)) == text
     assert tokenizer.vocab_size == TOKENIZER_VOCAB_SIZE == 257
     assert tokenizer.fingerprint() == TOKENIZER_FINGERPRINT
+
+
+@pytest.mark.parametrize("allow_end_of_document", [True, False])
+@pytest.mark.parametrize("token_id", [True, False, 256.0, 65.0, "65", None, -1, 257])
+def test_byte_decoder_rejects_invalid_token_types_and_values(token_id, allow_end_of_document):
+    with pytest.raises(DatasetValidationError, match="outside the byte vocabulary"):
+        Utf8ByteTokenizer().decode([token_id], allow_end_of_document=allow_end_of_document)
+
+
+def test_byte_decoder_preserves_valid_bytes_and_explicit_eod_policy():
+    tokenizer = Utf8ByteTokenizer()
+    assert tokenizer.decode([65, 0, 256, 66]) == "A\0B"
+    assert tokenizer.decode([65, 0, 66], allow_end_of_document=False) == "A\0B"
+    with pytest.raises(DatasetValidationError, match="outside the byte vocabulary"):
+        tokenizer.decode([65, 256], allow_end_of_document=False)
 
 
 def test_preparation_is_deterministic_and_splits_never_overlap(tmp_path: Path):
@@ -151,6 +169,32 @@ def test_changed_prepared_byte_is_rejected(tmp_path: Path):
         load_dataset_manifest(output)
 
 
+@pytest.mark.parametrize("identity_field", ["source_id", "repository"])
+def test_rehashed_dataset_cannot_relabel_stable_document_identity(
+    tmp_path: Path, identity_field: str
+):
+    output, _ = _prepare_fixture(tmp_path)
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if identity_field == "source_id":
+        documents_path = output / "documents.jsonl"
+        rows = [json.loads(line) for line in documents_path.read_text().splitlines()]
+        rows[0]["source_id"] = "different-source-document"
+        content = b"".join(
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n" for row in rows
+        )
+        documents_path.write_bytes(content)
+        manifest["documents"]["sha256"] = hashlib.sha256(content).hexdigest()
+        manifest["documents"]["byte_length"] = len(content)
+    else:
+        manifest["source"]["repository"] = "fttl://tests/different-repository"
+    manifest["dataset_fingerprint"] = _fingerprint_without_self(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(DatasetValidationError, match="stable document identity"):
+        load_prepared_documents(output)
+
+
 def test_tokenizer_drift_and_split_overlap_are_rejected(tmp_path: Path):
     output, _ = _prepare_fixture(tmp_path)
     manifest_path = output / "manifest.json"
@@ -178,6 +222,41 @@ def test_tokenizer_drift_and_split_overlap_are_rejected(tmp_path: Path):
         load_dataset_manifest(manifest_path)
 
 
+@pytest.mark.parametrize(
+    "component, field, value",
+    [
+        ("tokenizer", "byte_ids", [1, 255]),
+        ("tokenizer", "byte_ids", [False, 255]),
+        ("tokenizer", "vocab_size", 257.0),
+        ("tokenizer", "text_encoding", "UTF-16"),
+        ("tokenizer", "text_encoding", None),
+        ("tokenizer", "unknown_option", "enabled"),
+        ("preprocessing", "unicode_normalization", "NFD"),
+        ("preprocessing", "newlines", "CRLF"),
+        ("preprocessing", "document_order", "source order"),
+        ("preprocessing", "split", "random"),
+        ("preprocessing", "unicode_normalization", None),
+        ("preprocessing", "unknown_option", "enabled"),
+    ],
+)
+def test_manifest_rejects_noncanonical_component_declarations_before_data_access(
+    tmp_path: Path, component: str, field: str, value: object
+):
+    output, _ = _prepare_fixture(tmp_path)
+    manifest_path = output / "manifest.json"
+    altered = json.loads(manifest_path.read_text())
+    if value is None:
+        altered[component].pop(field)
+    else:
+        altered[component][field] = value
+    altered["dataset_fingerprint"] = _fingerprint_without_self(altered)
+    manifest_path.write_text(json.dumps(altered), encoding="utf-8")
+    (output / "documents.jsonl").unlink()
+
+    with pytest.raises(DatasetValidationError, match=f"{component} specification"):
+        load_dataset_manifest(manifest_path)
+
+
 def test_loaded_documents_have_stable_ids_and_default_to_train(tmp_path: Path):
     output, _ = _prepare_fixture(tmp_path)
     train_documents = load_prepared_documents(output)
@@ -200,6 +279,92 @@ def test_existing_output_must_match_the_requested_immutable_source(tmp_path: Pat
 
     with pytest.raises(DatasetValidationError, match="immutable source"):
         prepare_peps(tmp_path / "cache", output, source=different)
+
+
+@pytest.mark.parametrize("pipeline", ["gzip", "captured"])
+@pytest.mark.parametrize("limit", ["document", "total"])
+def test_ingestion_bounds_apply_after_unicode_normalization(
+    tmp_path: Path, monkeypatch, pipeline: str, limit: str
+):
+    # NFC expands U+0344 from two UTF-8 bytes into two combining marks (four bytes).
+    records = [{"id": "one", "text": "\u0344" * 64}]
+    if limit == "total":
+        records = [{"id": str(index), "text": "\u0344" * 32} for index in range(2)]
+    raw = b"".join(json.dumps(row, ensure_ascii=False).encode() + b"\n" for row in records)
+    archive = gzip.compress(raw, mtime=0) if pipeline == "gzip" else raw
+    source = DatasetSource(
+        repository="fttl://tests/normalization-bounds",
+        revision="fixture-v1",
+        path="records.jsonl.gz" if pipeline == "gzip" else "records.jsonl",
+        compressed_sha256=hashlib.sha256(archive).hexdigest(),
+        expected_document_count=len(records),
+        license="CC0-1.0",
+        license_limitations=(),
+        artifact_kind="gzip-jsonl" if pipeline == "gzip" else "sealed-jsonl",
+    )
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 200)
+    monkeypatch.setattr(dataset_module, "MAX_UNCOMPRESSED_BYTES", 240 if limit == "total" else 1000)
+    output = tmp_path / "prepared"
+    with pytest.raises(DatasetValidationError, match=f"normalized.*{limit}.*safety limit"):
+        if pipeline == "gzip":
+            prepare_peps(
+                tmp_path / "cache",
+                output,
+                source=source,
+                downloader=lambda _url, destination: destination.write_bytes(archive),
+            )
+        else:
+            artifact = tmp_path / "records.jsonl"
+            artifact.write_bytes(archive)
+            prepare_document_records(records, output, source_artifact=artifact, source=source)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".prepared.*"))
+
+
+def test_captured_text_limit_includes_required_terminal_newline(tmp_path: Path, monkeypatch):
+    records = [{"id": "one", "text": "1234"}]
+    artifact = tmp_path / "records.jsonl"
+    artifact.write_bytes(json.dumps(records).encode())
+    source = DatasetSource(
+        repository="fttl://tests/newline-boundary",
+        revision="fixture-v1",
+        path=artifact.name,
+        compressed_sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        expected_document_count=1,
+        license="CC0-1.0",
+        license_limitations=(),
+        artifact_kind="sealed-jsonl",
+    )
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 4)
+    with pytest.raises(DatasetValidationError, match="normalized.*document.*safety limit"):
+        prepare_document_records(
+            records, tmp_path / "rejected", source_artifact=artifact, source=source
+        )
+    assert not (tmp_path / "rejected").exists()
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 5)
+    manifest = prepare_document_records(
+        records, tmp_path / "accepted", source_artifact=artifact, source=source
+    )
+    assert manifest.counts["utf8_bytes"] == 5
+
+
+def test_gzip_reader_requests_bounded_lines(tmp_path: Path, monkeypatch):
+    requests = []
+
+    class BoundedStream(io.BytesIO):
+        def __iter__(self):
+            raise AssertionError("unbounded gzip line iteration")
+
+        def readline(self, size=-1):
+            requests.append(size)
+            assert size == 33
+            return super().readline(size)
+
+    monkeypatch.setattr(dataset_module, "MAX_DOCUMENT_BYTES", 32)
+    monkeypatch.setattr(gzip, "open", lambda *_args: BoundedStream(b"x" * 100))
+    with pytest.raises(DatasetValidationError, match="per-document safety limit"):
+        tuple(dataset_module._read_gzip_records(tmp_path / "source.gz"))
+    assert requests == [33]
 
 
 def _fingerprint_without_self(payload: dict[str, object]) -> str:

@@ -94,6 +94,13 @@ def _reject_json_constant(value: str) -> None:
     raise USGSValidationError(f"non-finite JSON number {value!r} is not allowed")
 
 
+def _parse_finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise USGSValidationError(f"non-finite JSON number {value!r} is not allowed")
+    return number
+
+
 def _feed_identity(feed: str) -> tuple[str, str]:
     try:
         feed_url = USGS_FEEDS[feed]
@@ -113,6 +120,7 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
         decoded = json.loads(
             payload.decode("utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_json_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise USGSValidationError("USGS response is not valid UTF-8 JSON") from error
@@ -187,12 +195,21 @@ def fetch_feed(
 ) -> bytes:
     if feed_url not in USGS_FEEDS.values():
         raise ValueError("feed_url must be one of the allowlisted USGS feeds")
-    if retries < 1 or retries > 5:
-        raise ValueError("retries must be between 1 and 5")
-    if timeout_seconds <= 0 or timeout_seconds > 60:
-        raise ValueError("timeout_seconds must be in (0, 60]")
-    if max_response_bytes < 1:
-        raise ValueError("max_response_bytes must be positive")
+    if isinstance(retries, bool) or not isinstance(retries, int) or not 1 <= retries <= 5:
+        raise ValueError("retries must be an integer between 1 and 5")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not 0 < timeout_seconds <= 60
+        or not math.isfinite(timeout_seconds)
+    ):
+        raise ValueError("timeout_seconds must be a finite number in (0, 60]")
+    if (
+        isinstance(max_response_bytes, bool)
+        or not isinstance(max_response_bytes, int)
+        or max_response_bytes < 1
+    ):
+        raise ValueError("max_response_bytes must be a positive integer")
 
     request = urllib.request.Request(
         feed_url,
@@ -349,7 +366,7 @@ class USGSCaptureLedger:
         source, feed_url = _feed_identity(feed)
         rows = self.connection.execute(
             """
-            SELECT event_id, updated_at_ms, payload_json
+            SELECT event_id, updated_at_ms, payload_json, payload_sha256
             FROM event_versions
             WHERE source = ? AND feed = ?
             ORDER BY event_id, updated_at_ms
@@ -358,16 +375,35 @@ class USGSCaptureLedger:
         ).fetchall()
         if not rows:
             raise ValueError("cannot seal an empty USGS capture ledger")
-        record_values = [
-            {
-                "document_id": f"{source}:{event_id}:{updated_at_ms}",
-                "event_id": event_id,
-                "source": source,
-                "text": payload_json,
-                "updated_at_ms": updated_at_ms,
-            }
-            for event_id, updated_at_ms, payload_json in rows
-        ]
+        record_values = []
+        for event_id, updated_at_ms, payload_json, payload_sha256 in rows:
+            if hashlib.sha256(payload_json.encode("utf-8")).hexdigest() != payload_sha256:
+                raise USGSValidationError(
+                    "USGS ledger payload checksum does not match stored bytes"
+                )
+            try:
+                feature = json.loads(
+                    payload_json,
+                    parse_constant=_reject_json_constant,
+                    parse_float=_parse_finite_json_float,
+                )
+            except json.JSONDecodeError as error:
+                raise USGSValidationError("USGS ledger payload is not valid JSON") from error
+            version = parse_feature_collection(
+                _canonical_json({"type": "FeatureCollection", "features": [feature]}).encode(),
+                source=source,
+            )[0]
+            if version.event_id != event_id or version.updated_at_ms != updated_at_ms:
+                raise USGSValidationError("USGS ledger payload identity does not match stored key")
+            record_values.append(
+                {
+                    "document_id": f"{source}:{event_id}:{updated_at_ms}",
+                    "event_id": event_id,
+                    "source": source,
+                    "text": payload_json,
+                    "updated_at_ms": updated_at_ms,
+                }
+            )
         content = (
             "\n".join(_canonical_json(record) for record in record_values) + "\n"
         ).encode("utf-8")
@@ -467,6 +503,7 @@ def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
         raw = json.loads(
             manifest_path.read_text(encoding="utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_json_float,
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise USGSValidationError("USGS snapshot manifest is not valid UTF-8 JSON") from error
@@ -525,7 +562,11 @@ def load_snapshot(
     try:
         lines = content.decode("utf-8").splitlines()
         for line in lines:
-            record = json.loads(line, parse_constant=_reject_json_constant)
+            record = json.loads(
+                line,
+                parse_constant=_reject_json_constant,
+                parse_float=_parse_finite_json_float,
+            )
             if not isinstance(record, dict) or set(record) != {
                 "document_id",
                 "event_id",
@@ -549,7 +590,11 @@ def load_snapshot(
             if identity in identities:
                 raise USGSValidationError("USGS snapshot repeats an event version")
             identities.add(identity)
-            feature = json.loads(record["text"], parse_constant=_reject_json_constant)
+            feature = json.loads(
+                record["text"],
+                parse_constant=_reject_json_constant,
+                parse_float=_parse_finite_json_float,
+            )
             validated = parse_feature_collection(
                 _canonical_json({"type": "FeatureCollection", "features": [feature]}).encode(),
                 source=manifest.source,

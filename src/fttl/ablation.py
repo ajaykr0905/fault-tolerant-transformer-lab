@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import platform
 import time
@@ -13,6 +14,8 @@ from fttl.config import ExperimentConfig
 from fttl.data import batch_for_step, synthetic_token_stream
 from fttl.lora import inject_lora
 from fttl.model import TinyTransformer
+from fttl.numerical import require_finite_state
+from fttl.state import capture_rng_state, code_fingerprint, restore_rng_state
 from fttl.train import seed_everything
 
 
@@ -28,8 +31,12 @@ class TuningRun:
 
 @dataclass(frozen=True)
 class TuningComparison:
+    """Schema 2 adds a comparison contract without changing config identity."""
+
     schema_version: int
     config_fingerprint: str
+    comparison_fingerprint: str
+    comparison_contract: dict[str, object]
     device: str
     python_version: str
     torch_version: str
@@ -38,10 +45,16 @@ class TuningComparison:
     limitations: tuple[str, ...]
 
 
+def _workload_token_count(config: ExperimentConfig) -> int:
+    return max(2_048, config.model.block_size * config.batch_size * 32)
+
+
 def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> TuningRun:
     parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(parameters, lr=config.learning_rate)
-    token_count = max(2_048, config.model.block_size * config.batch_size * 32)
+    require_finite_state(model.state_dict(), "model state")
+    require_finite_state(optimizer.state_dict(), "optimizer state")
+    token_count = _workload_token_count(config)
     tokens = synthetic_token_stream(token_count, config.model.vocab_size)
     losses: list[float] = []
     started = time.perf_counter()
@@ -51,10 +64,18 @@ def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> Tunin
         optimizer.zero_grad(set_to_none=True)
         _, loss = model(inputs, targets)
         assert loss is not None
+        require_finite_state(loss, "training loss")
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(parameters, max_norm=1.0, error_if_nonfinite=True)
         optimizer.step()
+        require_finite_state(model.state_dict(), "model state")
+        require_finite_state(optimizer.state_dict(), "optimizer state")
         losses.append(float(loss.detach()))
+    model.eval()
+    verification_inputs, _ = batch_for_step(tokens, config, 0)
+    with torch.no_grad():
+        verification_logits, _ = model(verification_inputs)
+    require_finite_state(verification_logits, "final verification logits")
     return TuningRun(
         mode=mode,
         trainable_parameters=sum(parameter.numel() for parameter in parameters),
@@ -72,16 +93,46 @@ def compare_tuning(config: ExperimentConfig, output: Path, *, rank: int = 4) -> 
 
     full = TinyTransformer(config.model)
     full.load_state_dict(base_state)
-    full_run = _train(full, config, "full")
 
     lora = TinyTransformer(config.model)
     lora.load_state_dict(base_state)
-    inject_lora(lora, rank=rank, alpha=float(rank * 2))
+    alpha = float(rank * 2)
+    target_names = ("qkv", "output")
+    summary = inject_lora(lora, rank=rank, alpha=alpha, target_names=target_names)
+    comparison_contract = {
+        "schema_version": 1,
+        "experiment_config": config.to_dict(),
+        "adapter": {
+            "rank": rank,
+            "alpha": alpha,
+            "target_names": list(target_names),
+            "replaced_modules": list(summary.replaced_modules),
+        },
+        "workload": {
+            "kind": "synthetic-token-stream-v1",
+            "token_count": _workload_token_count(config),
+        },
+        "execution": {
+            "parameter_dtypes": sorted({str(parameter.dtype) for parameter in full.parameters()}),
+            "parameter_devices": sorted({str(parameter.device) for parameter in full.parameters()}),
+            "code_fingerprint": code_fingerprint(),
+            "training_rng_policy": "shared-cpu-python-numpy-state-after-model-initialization-v1",
+        },
+    }
+    encoded_contract = json.dumps(
+        comparison_contract, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+
+    training_rng = capture_rng_state()
+    full_run = _train(full, config, "full")
+    restore_rng_state(training_rng)
     lora_run = _train(lora, config, "lora")
 
     comparison = TuningComparison(
-        schema_version=1,
+        schema_version=2,
         config_fingerprint=config.fingerprint(),
+        comparison_fingerprint=hashlib.sha256(encoded_contract.encode("utf-8")).hexdigest(),
+        comparison_contract=comparison_contract,
         device="cpu",
         python_version=platform.python_version(),
         torch_version=torch.__version__,

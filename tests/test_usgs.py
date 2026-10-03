@@ -140,6 +140,44 @@ def test_sealed_snapshot_is_content_addressed_and_repeatable(tmp_path: Path):
     assert records[0]["document_id"].startswith(f"{SOURCE}:ci-event-alpha:")
 
 
+@pytest.mark.parametrize("corruption", ["content", "checksum", "event_id", "updated_at_ms"])
+def test_sealing_rejects_corrupt_ledger_rows_without_side_effects(tmp_path: Path, corruption: str):
+    output_dir = tmp_path / "snapshot"
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        ledger.capture(fixture_bytes(), feed="all-day", captured_at="2026-09-24T00:00:00Z")
+        payload_json, checksum = ledger.connection.execute(
+            "SELECT payload_json, payload_sha256 FROM event_versions WHERE event_id = ?",
+            ("ci-event-alpha",),
+        ).fetchone()
+        feature = json.loads(payload_json)
+        if corruption == "content":
+            feature["properties"]["mag"] = 9.9
+        elif corruption == "checksum":
+            checksum = "0" * 64
+        elif corruption == "event_id":
+            feature["id"] = "different-event"
+        else:
+            feature["properties"]["updated"] += 1
+        payload_json = json.dumps(
+            feature, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        if corruption in {"event_id", "updated_at_ms"}:
+            checksum = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        ledger.connection.execute(
+            "UPDATE event_versions SET payload_json = ?, payload_sha256 = ? WHERE event_id = ?",
+            (payload_json, checksum, "ci-event-alpha"),
+        )
+        ledger.connection.commit()
+
+        message = "checksum" if corruption in {"content", "checksum"} else "identity"
+        with pytest.raises(USGSValidationError, match=message):
+            ledger.seal_snapshot(output_dir, feed="all-day")
+
+        assert not output_dir.exists()
+        assert ledger.connection.execute("SELECT COUNT(*) FROM sealed_snapshots").fetchone()[0] == 0
+        assert ledger.connection.execute("SELECT COUNT(*) FROM polls").fetchone()[0] == 1
+
+
 def test_snapshot_bytes_are_independent_of_feed_record_order(tmp_path: Path):
     reversed_payload = json.loads(fixture_bytes())
     reversed_payload["features"].reverse()
@@ -218,6 +256,82 @@ def test_parser_rejects_non_finite_coordinates_and_large_timestamps():
         parse_feature_collection(json.dumps(too_large).encode(), source=SOURCE)
 
 
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e400", "-1e400"])
+def test_non_finite_nested_numbers_never_enter_capture_ledger(tmp_path: Path, number: str):
+    feed = json.loads(fixture_bytes())
+    feed["features"][0]["properties"]["diagnostic"] = "__number__"
+    payload = json.dumps(feed).replace('"__number__"', number).encode()
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        with pytest.raises(USGSValidationError, match="non-finite JSON number"):
+            ledger.capture(payload, feed="all-day", captured_at="2026-10-03T00:00:00Z")
+        assert ledger.connection.execute("SELECT COUNT(*) FROM polls").fetchone()[0] == 0
+        assert ledger.connection.execute("SELECT COUNT(*) FROM event_versions").fetchone()[0] == 0
+
+
+def test_sealing_rejects_exponent_overflow_in_rehashed_ledger_payload(tmp_path: Path):
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        ledger.capture(fixture_bytes(), feed="all-day", captured_at="2026-10-03T00:00:00Z")
+        payload_json = ledger.connection.execute(
+            "SELECT payload_json FROM event_versions WHERE event_id = ?", ("ci-event-alpha",)
+        ).fetchone()[0]
+        payload = json.loads(payload_json)
+        payload["properties"]["diagnostic"] = "__number__"
+        payload_json = json.dumps(payload).replace('"__number__"', "1e400")
+        checksum = hashlib.sha256(payload_json.encode()).hexdigest()
+        ledger.connection.execute(
+            "UPDATE event_versions SET payload_json = ?, payload_sha256 = ? WHERE event_id = ?",
+            (payload_json, checksum, "ci-event-alpha"),
+        )
+        ledger.connection.commit()
+        output = tmp_path / "snapshot"
+        with pytest.raises(USGSValidationError, match="non-finite JSON number"):
+            ledger.seal_snapshot(output, feed="all-day")
+        assert not output.exists()
+        assert ledger.connection.execute("SELECT COUNT(*) FROM sealed_snapshots").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("number", [1e300, -1e300, 0.5, 5e-324])
+def test_finite_nested_numbers_survive_capture_seal_and_load(tmp_path: Path, number: float):
+    feed = json.loads(fixture_bytes())
+    feed["features"][0]["properties"]["diagnostic"] = {"values": [number]}
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        captured = ledger.capture(
+            json.dumps(feed).encode(), feed="all-day", captured_at="2026-10-03T00:00:00Z"
+        )
+        _, manifest_path, _ = ledger.seal_snapshot(tmp_path / "snapshot", feed="all-day")
+    _, records = load_snapshot(manifest_path)
+    assert captured.inserted_versions == 2
+    feature = json.loads(records[0]["text"])
+    assert feature["properties"]["diagnostic"] == {"values": [number]}
+
+
+def test_snapshot_loader_rejects_overflow_in_rehashed_embedded_feature(tmp_path: Path):
+    with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
+        ledger.capture(fixture_bytes(), feed="all-day", captured_at="2026-10-03T00:00:00Z")
+        data_path, manifest_path, _ = ledger.seal_snapshot(tmp_path / "snapshot", feed="all-day")
+    records = [json.loads(line) for line in data_path.read_text().splitlines()]
+    feature = json.loads(records[0]["text"])
+    feature["properties"]["diagnostic"] = "__number__"
+    records[0]["text"] = json.dumps(feature).replace('"__number__"', "1e400")
+    content = b"".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
+        for row in records
+    )
+    manifest = json.loads(manifest_path.read_text())
+    manifest["content_sha256"] = hashlib.sha256(content).hexdigest()
+    manifest["byte_length"] = len(content)
+    manifest["data_path"] = f"usgs-{manifest['content_sha256']}.jsonl"
+    (manifest_path.parent / manifest["data_path"]).write_bytes(content)
+    identity = dict(manifest)
+    identity.pop("snapshot_fingerprint")
+    manifest["snapshot_fingerprint"] = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(USGSValidationError, match="non-finite JSON number"):
+        load_snapshot(manifest_path)
+
+
 def test_fetch_is_bounded_retries_and_never_switches_source():
     attempts = []
     sleeps = []
@@ -248,6 +362,68 @@ def test_fetch_rejects_an_oversized_response():
 
     with pytest.raises(USGSValidationError, match="byte limit"):
         fetch_feed(FEED_URL, opener=opener, max_response_bytes=4)
+
+
+@pytest.mark.parametrize(
+    "control, value",
+    [
+        ("retries", True),
+        ("retries", 1.5),
+        ("retries", "3"),
+        ("retries", 0),
+        ("retries", 6),
+        ("timeout_seconds", True),
+        ("timeout_seconds", float("nan")),
+        ("timeout_seconds", float("inf")),
+        ("timeout_seconds", "15"),
+        ("timeout_seconds", 0),
+        ("timeout_seconds", 61),
+        ("max_response_bytes", True),
+        ("max_response_bytes", 4.5),
+        ("max_response_bytes", "4"),
+        ("max_response_bytes", 0),
+    ],
+)
+def test_invalid_fetch_controls_fail_before_network_or_backoff(control: str, value: object):
+    calls = []
+
+    def opener(*_args):
+        calls.append("open")
+        return io.BytesIO(b"ok")
+
+    with pytest.raises(ValueError, match=control):
+        fetch_feed(
+            FEED_URL,
+            opener=opener,
+            sleeper=lambda _delay: calls.append("sleep"),
+            **{control: value},
+        )
+    assert calls == []
+
+
+def test_fetch_accepts_timeout_and_retry_upper_boundaries():
+    attempts = []
+    delays = []
+
+    def opener(_request, timeout):
+        attempts.append(timeout)
+        if len(attempts) < 5:
+            raise urllib.error.URLError("temporary fixture failure")
+        return io.BytesIO(b"ok")
+
+    assert (
+        fetch_feed(
+            FEED_URL,
+            opener=opener,
+            sleeper=delays.append,
+            timeout_seconds=60,
+            retries=5,
+            max_response_bytes=2,
+        )
+        == b"ok"
+    )
+    assert attempts == [60] * 5
+    assert delays == [1.0, 2.0, 4.0, 8.0]
 
 
 def test_sealed_feed_enters_the_same_training_and_recovery_pipeline(tmp_path: Path):

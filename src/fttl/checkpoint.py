@@ -9,6 +9,7 @@ opened with ``torch.load(..., weights_only=True)``.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -324,7 +325,11 @@ def _validate_generation_files(generation_dir: Path) -> CheckpointManifestV2:
         raise CheckpointIntegrityError("checkpoint state file is missing") from error
     if actual_length != manifest.state_bytes:
         raise CheckpointIntegrityError("checkpoint state byte length does not match manifest")
-    if _sha256(state_path) != manifest.state_sha256:
+    try:
+        actual_sha256 = _sha256(state_path)
+    except OSError as error:
+        raise CheckpointIntegrityError("checkpoint state file is unreadable") from error
+    if actual_sha256 != manifest.state_sha256:
         raise CheckpointIntegrityError("checkpoint state SHA-256 does not match manifest")
     return manifest
 
@@ -478,12 +483,27 @@ def save_checkpoint(
     stages and exists solely for deterministic crash testing.
     """
 
-    if step < 0 or tokens_seen < 0:
-        raise ValueError("checkpoint counters cannot be negative")
-    if retention < 2:
+    for label, value in (("step", step), ("tokens_seen", tokens_seen)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"checkpoint {label} must be a non-negative integer")
+    if isinstance(retention, bool) or not isinstance(retention, int) or retention < 2:
         raise ValueError("checkpoint retention must keep at least two generations")
-    if not data_fingerprint or not tokenizer_fingerprint or not run_contract_fingerprint:
-        raise ValueError("checkpoint input fingerprints cannot be empty")
+    if any(
+        not isinstance(value, str) or not value
+        for value in (data_fingerprint, tokenizer_fingerprint, run_contract_fingerprint)
+    ):
+        raise ValueError("checkpoint input fingerprints must be non-empty strings")
+    try:
+        cursor_value = None if cursor is None else _json_compatible(cursor)
+        if cursor_value is not None and not isinstance(cursor_value, dict):
+            raise ValueError("checkpoint cursor must be an object or null")
+        json.dumps(cursor_value, allow_nan=False)
+        batch_id_values = [str(value) for value in (batch_ids or [])]
+        sample_id_values = [[str(sample_id) for sample_id in batch] for batch in (sample_ids or [])]
+        loss_values = [float(loss) for loss in losses]
+        json.dumps(loss_values, allow_nan=False)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"invalid checkpoint metadata: {error}") from error
 
     root = Path(path)
     if root.exists() and not root.is_dir():
@@ -506,12 +526,6 @@ def save_checkpoint(
     published_dir = root / generation_name
     temporary_dir.mkdir()
 
-    cursor_value = None if cursor is None else _json_compatible(cursor)
-    batch_id_values = [str(value) for value in (batch_ids or [])]
-    sample_id_values = [
-        [str(sample_id) for sample_id in batch]
-        for batch in (sample_ids or [])
-    ]
     payload: dict[str, Any] = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "config": config.to_dict(),
@@ -523,7 +537,7 @@ def save_checkpoint(
         "optimizer": optimizer.state_dict(),
         "step": step,
         "tokens_seen": tokens_seen,
-        "losses": [float(loss) for loss in losses],
+        "losses": loss_values,
         "cursor": cursor_value,
         "batch_ids": batch_id_values,
         "sample_ids": sample_id_values,
@@ -676,10 +690,20 @@ def load_checkpoint(
         raise CheckpointIntegrityError(
             f"checkpoint state is missing keys: {', '.join(missing)}"
         )
+    original_model = copy.deepcopy(model.state_dict())
+    original_optimizer = copy.deepcopy(optimizer.state_dict())
+    original_rng = capture_rng_state()
+
+    def rollback() -> None:
+        model.load_state_dict(original_model)
+        optimizer.load_state_dict(original_optimizer)
+        restore_rng_state(original_rng)
+
     try:
         model.load_state_dict(payload["model"])
         optimizer.load_state_dict(payload["optimizer"])
-    except (KeyError, TypeError, RuntimeError, ValueError) as error:
+    except Exception as error:
+        rollback()
         raise CheckpointMismatchError(
             "checkpoint model or optimizer state does not match experiment"
         ) from error
@@ -689,6 +713,7 @@ def load_checkpoint(
                 restore_rng_state(payload["rng_state"])
             elif "torch_rng_state" in payload:
                 torch.set_rng_state(payload["torch_rng_state"])
-        except (KeyError, TypeError, RuntimeError, ValueError) as error:
+        except (KeyError, TypeError, RuntimeError, ValueError, OverflowError) as error:
+            rollback()
             raise CheckpointIntegrityError("checkpoint RNG state is invalid") from error
     return payload

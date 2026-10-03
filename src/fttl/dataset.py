@@ -121,9 +121,13 @@ class Utf8ByteTokenizer:
     def decode(self, token_ids: Iterable[int], *, allow_end_of_document: bool = True) -> str:
         byte_values: list[int] = []
         for token_id in token_ids:
+            if isinstance(token_id, bool) or not isinstance(token_id, int):
+                raise DatasetValidationError(
+                    f"token id {token_id!r} is outside the byte vocabulary"
+                )
             if token_id == self.end_of_document_id and allow_end_of_document:
                 continue
-            if not isinstance(token_id, int) or not 0 <= token_id <= 255:
+            if not 0 <= token_id <= 255:
                 raise DatasetValidationError(f"token id {token_id!r} is outside the byte vocabulary")
             byte_values.append(token_id)
         return bytes(byte_values).decode("utf-8")
@@ -359,7 +363,8 @@ def _read_gzip_records(path: Path) -> Iterator[Mapping[str, object]]:
     total_bytes = 0
     try:
         with gzip.open(path, "rb") as stream:
-            for line_number, raw_line in enumerate(stream, start=1):
+            bounded_lines = iter(lambda: stream.readline(MAX_DOCUMENT_BYTES + 1), b"")
+            for line_number, raw_line in enumerate(bounded_lines, start=1):
                 total_bytes += len(raw_line)
                 if total_bytes > MAX_UNCOMPRESSED_BYTES:
                     raise DatasetValidationError("uncompressed dataset exceeds the safety limit")
@@ -427,11 +432,20 @@ def _canonicalize_records(
 ) -> tuple[PreparedDocument, ...]:
     documents: list[PreparedDocument] = []
     seen_document_ids: set[str] = set()
+    total_normalized_bytes = 0
     for ordinal, record in enumerate(records, start=1):
         raw_text = record.get("text")
         if not isinstance(raw_text, str) or not raw_text.strip():
             raise DatasetValidationError(f"record {ordinal} has no non-empty text field")
         text = _normalize_text(raw_text)
+        text_bytes = text.encode("utf-8")
+        if len(text_bytes) > MAX_DOCUMENT_BYTES:
+            raise DatasetValidationError(
+                f"normalized document {ordinal} exceeds the per-document safety limit"
+            )
+        total_normalized_bytes += len(text_bytes)
+        if total_normalized_bytes > MAX_UNCOMPRESSED_BYTES:
+            raise DatasetValidationError("normalized dataset total exceeds the safety limit")
         source_id = _extract_source_id(record, text)
         document_id = stable_document_id(source_repository, source_id)
         if document_id in seen_document_ids:
@@ -443,7 +457,7 @@ def _canonicalize_records(
                 source_id=source_id,
                 split=split_for_document(document_id),
                 text=text,
-                text_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                text_sha256=hashlib.sha256(text_bytes).hexdigest(),
             )
         )
     return tuple(sorted(documents, key=lambda document: document.document_id))
@@ -562,10 +576,22 @@ def _validate_manifest_contract(manifest: DatasetManifestV1) -> None:
         raise DatasetValidationError("tokenizer vocabulary size drift detected")
     if manifest.tokenizer.get("end_of_document_id") != TOKENIZER_EOD_ID:
         raise DatasetValidationError("tokenizer end-of-document id drift detected")
+    expected_tokenizer = {**TOKENIZER_SPEC, "fingerprint": TOKENIZER_FINGERPRINT}
+    if _canonical_json_bytes(manifest.tokenizer) != _canonical_json_bytes(expected_tokenizer):
+        raise DatasetValidationError(
+            "tokenizer specification does not match the supported contract"
+        )
     if manifest.preprocessing.get("name") != PREPROCESSING_NAME:
         raise DatasetValidationError("unsupported preprocessing identity")
     if manifest.preprocessing.get("fingerprint") != PREPROCESSING_FINGERPRINT:
         raise DatasetValidationError("preprocessing fingerprint drift detected")
+    expected_preprocessing = {**PREPROCESSING_SPEC, "fingerprint": PREPROCESSING_FINGERPRINT}
+    if _canonical_json_bytes(manifest.preprocessing) != _canonical_json_bytes(
+        expected_preprocessing
+    ):
+        raise DatasetValidationError(
+            "preprocessing specification does not match the supported contract"
+        )
 
     if set(manifest.splits) != {"train", "validation", "test"}:
         raise DatasetValidationError("manifest must define train, validation, and test splits")
@@ -619,6 +645,12 @@ def _verify_prepared_documents(base_dir: Path, manifest: DatasetManifestV1) -> N
     _verify_file(documents_path, expected_hash, "prepared documents")
 
     documents = tuple(_iter_prepared_documents(documents_path))
+    for document in documents:
+        expected_id = stable_document_id(str(manifest.source["repository"]), document.source_id)
+        if document.document_id != expected_id:
+            raise DatasetValidationError(
+                "prepared stable document identity does not match its repository and source id"
+            )
     if len(documents) != manifest.counts.get("documents"):
         raise DatasetValidationError("prepared document count does not match manifest")
     expected_by_split = {
