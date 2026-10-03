@@ -195,12 +195,21 @@ def fetch_feed(
 ) -> bytes:
     if feed_url not in USGS_FEEDS.values():
         raise ValueError("feed_url must be one of the allowlisted USGS feeds")
-    if retries < 1 or retries > 5:
-        raise ValueError("retries must be between 1 and 5")
-    if timeout_seconds <= 0 or timeout_seconds > 60:
-        raise ValueError("timeout_seconds must be in (0, 60]")
-    if max_response_bytes < 1:
-        raise ValueError("max_response_bytes must be positive")
+    if isinstance(retries, bool) or not isinstance(retries, int) or not 1 <= retries <= 5:
+        raise ValueError("retries must be an integer between 1 and 5")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not 0 < timeout_seconds <= 60
+        or not math.isfinite(timeout_seconds)
+    ):
+        raise ValueError("timeout_seconds must be a finite number in (0, 60]")
+    if (
+        isinstance(max_response_bytes, bool)
+        or not isinstance(max_response_bytes, int)
+        or max_response_bytes < 1
+    ):
+        raise ValueError("max_response_bytes must be a positive integer")
 
     request = urllib.request.Request(
         feed_url,

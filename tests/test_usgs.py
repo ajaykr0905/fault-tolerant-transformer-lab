@@ -364,6 +364,68 @@ def test_fetch_rejects_an_oversized_response():
         fetch_feed(FEED_URL, opener=opener, max_response_bytes=4)
 
 
+@pytest.mark.parametrize(
+    "control, value",
+    [
+        ("retries", True),
+        ("retries", 1.5),
+        ("retries", "3"),
+        ("retries", 0),
+        ("retries", 6),
+        ("timeout_seconds", True),
+        ("timeout_seconds", float("nan")),
+        ("timeout_seconds", float("inf")),
+        ("timeout_seconds", "15"),
+        ("timeout_seconds", 0),
+        ("timeout_seconds", 61),
+        ("max_response_bytes", True),
+        ("max_response_bytes", 4.5),
+        ("max_response_bytes", "4"),
+        ("max_response_bytes", 0),
+    ],
+)
+def test_invalid_fetch_controls_fail_before_network_or_backoff(control: str, value: object):
+    calls = []
+
+    def opener(*_args):
+        calls.append("open")
+        return io.BytesIO(b"ok")
+
+    with pytest.raises(ValueError, match=control):
+        fetch_feed(
+            FEED_URL,
+            opener=opener,
+            sleeper=lambda _delay: calls.append("sleep"),
+            **{control: value},
+        )
+    assert calls == []
+
+
+def test_fetch_accepts_timeout_and_retry_upper_boundaries():
+    attempts = []
+    delays = []
+
+    def opener(_request, timeout):
+        attempts.append(timeout)
+        if len(attempts) < 5:
+            raise urllib.error.URLError("temporary fixture failure")
+        return io.BytesIO(b"ok")
+
+    assert (
+        fetch_feed(
+            FEED_URL,
+            opener=opener,
+            sleeper=delays.append,
+            timeout_seconds=60,
+            retries=5,
+            max_response_bytes=2,
+        )
+        == b"ok"
+    )
+    assert attempts == [60] * 5
+    assert delays == [1.0, 2.0, 4.0, 8.0]
+
+
 def test_sealed_feed_enters_the_same_training_and_recovery_pipeline(tmp_path: Path):
     with USGSCaptureLedger(tmp_path / "capture.sqlite3") as ledger:
         ledger.capture(
