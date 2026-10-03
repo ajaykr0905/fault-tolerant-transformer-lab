@@ -13,6 +13,7 @@ from fttl.config import ExperimentConfig
 from fttl.data import batch_for_step, synthetic_token_stream
 from fttl.lora import inject_lora
 from fttl.model import TinyTransformer
+from fttl.state import capture_rng_state, restore_rng_state
 from fttl.train import seed_everything
 
 
@@ -72,11 +73,14 @@ def compare_tuning(config: ExperimentConfig, output: Path, *, rank: int = 4) -> 
 
     full = TinyTransformer(config.model)
     full.load_state_dict(base_state)
-    full_run = _train(full, config, "full")
 
     lora = TinyTransformer(config.model)
     lora.load_state_dict(base_state)
     inject_lora(lora, rank=rank, alpha=float(rank * 2))
+
+    training_rng = capture_rng_state()
+    full_run = _train(full, config, "full")
+    restore_rng_state(training_rng)
     lora_run = _train(lora, config, "lora")
 
     comparison = TuningComparison(
