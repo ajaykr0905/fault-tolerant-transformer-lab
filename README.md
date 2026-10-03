@@ -125,6 +125,10 @@ process-kill recovery. Use the [pinned Colab notebook](notebooks/colab_cuda_reco
 See the [Colab notebook and evidence](docs/colab-gpu-evidence.md) for the executed notebook link,
 report and access limitations; screenshot capture is not yet published.
 
+The separate [CUDA process-death verifier](docs/cuda-process-recovery.md) checks
+one actual SIGKILL boundary using independently spawned GPU workers. Its new GPU
+validation is pending; the October 3 reconstruction report does not prove it.
+
 ## Research references and upstream work
 
 This lab studies reliable training, not language-model quality. Its workload is an independently
