@@ -474,6 +474,7 @@ def save_checkpoint(
     run_contract_fingerprint: str = DEFAULT_RUN_CONTRACT_FINGERPRINT,
     failure_injector: FailureInjector | None = None,
     retention: int = 2,
+    rng_state: Mapping[str, Any] | None = None,
 ) -> CheckpointManifestV2:
     """Atomically publish a trusted-local checkpoint generation.
 
@@ -504,6 +505,20 @@ def save_checkpoint(
         json.dumps(loss_values, allow_nan=False)
     except (TypeError, ValueError, OverflowError) as error:
         raise ValueError(f"invalid checkpoint metadata: {error}") from error
+
+    if rng_state is None:
+        rng_state_value = None
+    else:
+        from fttl.cuda_runtime import validate_cpu_rng_state, validate_cuda_rng_state
+
+        if not isinstance(rng_state, Mapping):
+            raise ValueError("explicit checkpoint RNG state must be a mapping")
+        if set(rng_state).difference({"python", "numpy", "torch_cpu", "torch_cuda"}):
+            raise ValueError("explicit checkpoint RNG state contains unsupported fields")
+        rng_state_value = copy.deepcopy(dict(rng_state))
+        validate_cpu_rng_state(rng_state_value)
+        if "torch_cuda" in rng_state_value:
+            validate_cuda_rng_state(rng_state_value, torch.device("cuda:0"))
 
     root = Path(path)
     if root.exists() and not root.is_dir():
@@ -541,7 +556,7 @@ def save_checkpoint(
         "cursor": cursor_value,
         "batch_ids": batch_id_values,
         "sample_ids": sample_id_values,
-        "rng_state": capture_rng_state(),
+        "rng_state": capture_rng_state() if rng_state_value is None else rng_state_value,
     }
     state_path = temporary_dir / STATE_FILENAME
     with state_path.open("wb") as handle:

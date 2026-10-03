@@ -3,6 +3,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +113,120 @@ def test_manifest_binds_generation_state_and_inputs(tmp_path: Path):
     assert manifest.cursor == {"batch_id": 1, "next_sample_ids": ["sample-1"]}
     assert manifest.data_fingerprint == "dataset-a"
     assert manifest.tokenizer_fingerprint == "utf8-byte-v1"
+
+
+def test_explicit_rng_checkpoint_uses_snapshot_without_mutating_global_rngs(tmp_path: Path):
+    config = checkpoint_config()
+    model, optimizer = model_and_optimizer(config)
+    supplied = capture_rng_state()
+    expected = copy.deepcopy(supplied)
+    torch.manual_seed(923)
+    before = capture_rng_state()
+
+    def mutate_input(stage):
+        if stage == "after-state-serialize":
+            supplied["torch_cpu"].zero_()
+            supplied["numpy"]["keys"][0] = 0
+
+    store = tmp_path / "explicit-rng"
+    save_checkpoint(
+        store,
+        model=model,
+        optimizer=optimizer,
+        config=config,
+        step=0,
+        tokens_seen=0,
+        losses=[],
+        rng_state=supplied,
+        failure_injector=mutate_input,
+    )
+    assert state_trees_equal(before, capture_rng_state())
+    payload = torch.load(store / "generation-00000001" / "state.pt", weights_only=True)
+    assert state_trees_equal(expected, payload["rng_state"])
+    assert not state_trees_equal(supplied, payload["rng_state"])
+
+
+@pytest.mark.parametrize("invalid", [[], {}, {"extra": "not allowed"}, "bad-cpu", "bad-cuda"])
+@pytest.mark.parametrize("existing_store", [False, True])
+def test_invalid_explicit_rng_is_rejected_before_store_changes(
+    tmp_path: Path, invalid, existing_store
+):
+    config = checkpoint_config()
+    model, optimizer = model_and_optimizer(config)
+    if invalid in ("bad-cpu", "bad-cuda"):
+        supplied = capture_rng_state()
+        if invalid == "bad-cpu":
+            supplied["torch_cpu"] = torch.zeros(1, dtype=torch.uint8)
+        else:
+            supplied["torch_cuda"] = {
+                "schema_version": 2,
+                "device_index": 0,
+                "state": torch.zeros(1, dtype=torch.uint8),
+            }
+    else:
+        supplied = invalid
+    store = tmp_path / "invalid-rng"
+    if existing_store:
+        publish(store, config, step=1, marker=0.25)
+    before = capture_rng_state()
+    before_files = {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    with pytest.raises(ValueError):
+        save_checkpoint(
+            store,
+            model=model,
+            optimizer=optimizer,
+            config=config,
+            step=0,
+            tokens_seen=0,
+            losses=[],
+            rng_state=supplied,
+        )
+    assert store.exists() is existing_store
+    assert before_files == {
+        path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()
+    }
+    assert state_trees_equal(before, capture_rng_state())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="real CUDA hardware unavailable")
+def test_real_cuda_rng_checkpoint_is_weights_only_safe_and_cpu_loadable(tmp_path: Path):
+    # Keep native CUDA initialization out of the shared pytest process.
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from pathlib import Path
+import torch
+from fttl.checkpoint import save_checkpoint, load_checkpoint
+from fttl.config import ExperimentConfig
+from fttl.cuda_runtime import prepare_cuda_execution, capture_cuda_rng_state
+from fttl.model import TinyTransformer
+from fttl.state import state_trees_equal
+device, metadata = prepare_cuda_execution()
+config = ExperimentConfig.from_json(sys.argv[2])
+model = TinyTransformer(config.model)
+optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+state = capture_cuda_rng_state(device)
+store = Path(sys.argv[1])
+save_checkpoint(store, model=model, optimizer=optimizer, config=config,
+                step=0, tokens_seen=0, losses=[], rng_state=state)
+payload = load_checkpoint(store, model=model, optimizer=optimizer,
+                          expected_config=config, restore_rng=False)
+assert state_trees_equal(state, payload['rng_state'])
+""",
+            str(tmp_path / "cuda-rng"),
+            json.dumps(checkpoint_config().to_dict()),
+        ],
+        env={**os.environ, "CUBLAS_WORKSPACE_CONFIG": ":4096:8"},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 @pytest.mark.parametrize(
