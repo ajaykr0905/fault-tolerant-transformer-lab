@@ -100,3 +100,60 @@ def test_lora_injection_preserves_float64_transformer_outputs():
         after, _ = model(tokens)
     torch.testing.assert_close(before, after, rtol=0, atol=0)
     assert all(parameter.dtype == torch.float64 for parameter in model.parameters())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"rank": 0},
+        {"rank": True},
+        {"rank": 1.5},
+        {"rank": 4},
+        {"alpha": 0},
+        {"alpha": float("nan")},
+        {"alpha": float("inf")},
+        {"alpha": True},
+        {"alpha": "4"},
+        {"target_names": ("missing",)},
+        {"target_names": ()},
+        {"target_names": "qkv"},
+        {"target_names": ("qkv", None)},
+    ],
+)
+def test_rejected_lora_injection_preserves_model_state(kwargs):
+    model = torch.nn.Module()
+    model.qkv = torch.nn.Linear(8, 8)
+    model.output = torch.nn.Linear(2, 2)
+    model.output.bias.requires_grad = False
+    modules_before = dict(model.named_modules())
+    parameters_before = dict(model.named_parameters())
+    flags_before = {name: parameter.requires_grad for name, parameter in parameters_before.items()}
+    state_before = {name: value.detach().clone() for name, value in model.state_dict().items()}
+
+    options = {"rank": 2, "alpha": 4, **kwargs}
+    with pytest.raises(ValueError):
+        inject_lora(model, **options)
+
+    assert dict(model.named_modules()) == modules_before
+    assert all(parameter is parameters_before[name] for name, parameter in model.named_parameters())
+    assert {
+        name: parameter.requires_grad for name, parameter in model.named_parameters()
+    } == flags_before
+    for name, value in model.state_dict().items():
+        torch.testing.assert_close(value, state_before[name], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("rank", [True, 1.5, "2", None])
+def test_lora_linear_rejects_noninteger_rank_without_freezing_base(rank):
+    base = torch.nn.Linear(8, 6)
+    with pytest.raises(ValueError, match="rank"):
+        LoRALinear(base, rank=rank, alpha=4)
+    assert all(parameter.requires_grad for parameter in base.parameters())
+
+
+@pytest.mark.parametrize("alpha", [True, float("nan"), float("inf"), "4", None])
+def test_lora_linear_rejects_invalid_alpha_without_freezing_base(alpha):
+    base = torch.nn.Linear(8, 6)
+    with pytest.raises(ValueError, match="alpha"):
+        LoRALinear(base, rank=2, alpha=alpha)
+    assert all(parameter.requires_grad for parameter in base.parameters())
