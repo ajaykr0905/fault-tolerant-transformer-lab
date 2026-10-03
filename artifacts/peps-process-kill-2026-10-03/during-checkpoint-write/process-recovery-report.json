@@ -1,0 +1,105 @@
+{
+  "abandoned_staging_files": [
+    "recovered/checkpoints/.generation-00000002.tmp-914ad57dfdf248c8b1b5bb4cd461007f/state.pt"
+  ],
+  "artifacts": {
+    "control_result": "control/result.json",
+    "recovered_checkpoints": "recovered/checkpoints",
+    "recovered_result": "recovered/result.json"
+  },
+  "attempted_step": 2,
+  "code_fingerprint": "9028fd672e67ed11831ecc5ef0201e960197bf9defcb44a935df6e1218c9a0ec",
+  "code_revision": "8ecf0ea9c7174a57ba3dd9bc36d04b05854d3a48",
+  "completed_steps": 6,
+  "config_fingerprint": "b0f1cd6f83ada78e17c7783c29d3cbcdd5339989f957903fbc76eac9ec0bbcb5",
+  "control_run_fingerprint": "35261f10f9968de8dfc26b17fc91cddede339026cdba60b6c12d4465d77d471c",
+  "data_kind": "prepared-dataset",
+  "dataset_fingerprint": "8c0076aec77c84fb8f59b5c5772136131805f7837aae6d4d2af928bfc0be6329",
+  "discarded_compute_tokens": 64,
+  "durable_committed_steps_lost": 0,
+  "durable_committed_tokens_lost": 0,
+  "durable_step_before_kill": 1,
+  "environment": {
+    "device": "cpu",
+    "machine": "arm64",
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "python": "3.12.12",
+    "pytorch": "2.13.0",
+    "worker_torch_threads": 1
+  },
+  "equality": {
+    "batch_id_sequence": true,
+    "completed_steps": true,
+    "cursor": true,
+    "final_checkpoint_state": true,
+    "final_logits_digest": true,
+    "final_logits_tensors": true,
+    "final_state_digest": true,
+    "loss_sequence": true,
+    "model_tensors": true,
+    "optimizer_tensors": true,
+    "rng_state": true,
+    "run_contract": true,
+    "run_fingerprint": true,
+    "sample_id_sequence": true,
+    "staging_cleanup": true,
+    "token_count": true
+  },
+  "exact_equality": true,
+  "failed_batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+  "failed_sample_ids": [
+    "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+    "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+  ],
+  "failure_point": "during-checkpoint-write",
+  "final_state_digest": "4ff28fd273874c94dcff5494bde84bf629ba45ad569194a065b2e690bcd5243e",
+  "interrupted_exitcode": -9,
+  "kill_signal": "SIGKILL",
+  "limitations": [
+    "This report proves recovery after one parent-controlled POSIX SIGKILL in this pinned CPU run.",
+    "The boundary handshake pauses one worker; it does not sample arbitrary asynchronous kill times.",
+    "The operating system and filesystem remain running; this is not a power-loss durability proof.",
+    "It does not measure model quality, GPU behavior, distributed scale, or production readiness.",
+    "Timing includes local process startup and IPC; it is not a benchmark or service-level objective.",
+    "Checkpoint hashes detect corruption but do not authenticate attacker-controlled artifacts."
+  ],
+  "process_start_method": "spawn",
+  "recovered_run_fingerprint": "35261f10f9968de8dfc26b17fc91cddede339026cdba60b6c12d4465d77d471c",
+  "replayed_batch_id": "aeecb2e68ff23f573213c749b0462cf275e7f91e52e404408e897d315dc75797",
+  "replayed_sample_ids": [
+    "00f4bf8f0b46bcce14a78a737de850284acd54612c7dcfea0fbefb7a49eb3e7b:000000000000",
+    "017b0c45f4d368b1ec43004751962cf084999825d64985c3b86c337d2519587e:000000000000"
+  ],
+  "replayed_tokens": 64,
+  "run_contract_fingerprint": "05dd7ff3749ae4085583b7e96089614f70e8479d58c63a2f0f7231c58ff5a550",
+  "schema": "ProcessRecoveryReportV1",
+  "selected_generation": 1,
+  "selected_step": 1,
+  "selected_tokens_seen": 64,
+  "staging_cleanup_complete": true,
+  "timing_boundaries": {
+    "checkpoint_selection_load": "Replay worker checkpoint load call, including integrity selection and state restoration.",
+    "completion_spawn_to_exit": "Parent Process.start call to joined final completion worker exit.",
+    "control_spawn_to_exit": "Parent Process.start call to joined control worker exit.",
+    "kill_request_to_exit": "Parent SIGKILL request to joined interrupted worker exit.",
+    "replayed_commit_receipt_to_exit": "Parent receipt of step-2 commit IPC to joined replay worker exit, including result writing.",
+    "resume_spawn_to_replayed_commit_receipt": "Parent Process.start call to receipt of step-2 commit IPC; includes spawn/import, restore, replay, durable save, and IPC delivery."
+  },
+  "timings_seconds": {
+    "checkpoint_selection_load": 0.007121,
+    "completion_spawn_to_exit": 2.779516,
+    "control_spawn_to_exit": 3.265915,
+    "kill_request_to_exit": 0.012395,
+    "replayed_commit_receipt_to_exit": 0.422539,
+    "resume_spawn_to_replayed_commit_receipt": 2.154943
+  },
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 384,
+  "verified_at_utc": "2026-10-03T09:38:01.666565+00:00",
+  "worker_pids": {
+    "completion": 42217,
+    "control": 42157,
+    "interrupted": 42197,
+    "replay": 42210
+  }
+}

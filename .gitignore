@@ -27,4 +27,12 @@ artifacts/peps-recovery-v0.2/scenarios/*
 !artifacts/peps-recovery-v0.2/scenarios/during-checkpoint-write/
 artifacts/peps-recovery-v0.2/scenarios/*/*
 !artifacts/peps-recovery-v0.2/scenarios/*/recovery-report.json
+!artifacts/peps-process-kill-2026-10-03/
+artifacts/peps-process-kill-2026-10-03/*
+!artifacts/peps-process-kill-2026-10-03/before-forward/
+!artifacts/peps-process-kill-2026-10-03/after-backward/
+!artifacts/peps-process-kill-2026-10-03/after-optimizer/
+!artifacts/peps-process-kill-2026-10-03/during-checkpoint-write/
+artifacts/peps-process-kill-2026-10-03/*/*
+!artifacts/peps-process-kill-2026-10-03/*/process-recovery-report.json
 .DS_Store
