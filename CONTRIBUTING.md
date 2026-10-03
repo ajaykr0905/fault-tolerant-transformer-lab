@@ -23,12 +23,18 @@ uv run --frozen ruff check .
 uv run --frozen python -m compileall -q src tests
 uv run --frozen pytest
 uv run --frozen pytest tests/test_real_data_recovery.py::test_complete_matrix_is_public_safe_and_passes_all_scenarios
+uv run --frozen pytest tests/test_process_recovery.py
 git diff --check
 ```
 
 The named recovery-matrix test prepares the small, independently written CC0
 fixture in `tests/fixtures/`. It must remain network-free; CI never downloads the
 Common Pile corpus.
+
+The process-recovery tests use POSIX `SIGKILL` against spawned workers at all four
+transaction boundaries. They verify exact independent-process state equality,
+bounded startup/completion deadlines, child cleanup, dataset mismatch rejection,
+and the installed CLI. See [the operating instructions](docs/process-recovery.md).
 
 Exercise the installed command-line interfaces with fresh output paths:
 

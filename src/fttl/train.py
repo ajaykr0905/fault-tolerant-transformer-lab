@@ -5,6 +5,7 @@ import os
 import platform
 import random
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
@@ -39,7 +40,7 @@ FAILURE_POINTS: tuple[FailurePoint, ...] = (
 
 
 class InjectedTrainingFailure(RuntimeError):
-    """A deterministic process-crash surrogate used by the recovery verifier."""
+    """Metadata for a deterministic failed step before its durable commit."""
 
     def __init__(
         self,
@@ -52,8 +53,7 @@ class InjectedTrainingFailure(RuntimeError):
         attempted_tokens: int,
     ) -> None:
         super().__init__(
-            f"injected failure at {point} for step {attempted_step} "
-            f"(durable step {durable_step})"
+            f"injected failure at {point} for step {attempted_step} (durable step {durable_step})"
         )
         self.point = point
         self.attempted_step = attempted_step
@@ -114,9 +114,7 @@ def _write_json(path: Path, value: object) -> None:
     os.replace(temporary, path)
 
 
-def _batch_source(
-    config: ExperimentConfig, dataset_manifest: Path | None
-) -> BatchSource:
+def _batch_source(config: ExperimentConfig, dataset_manifest: Path | None) -> BatchSource:
     if dataset_manifest is None:
         return SyntheticBatchSource(config)
     return PreparedDatasetBatchSource.from_manifest(config, dataset_manifest)
@@ -130,8 +128,9 @@ def _raise_injected(
     batch_id: str,
     sample_ids: tuple[str, ...],
     attempted_tokens: int,
+    observer: Callable[[InjectedTrainingFailure], None] | None = None,
 ) -> None:
-    raise InjectedTrainingFailure(
+    failure = InjectedTrainingFailure(
         point=point,
         attempted_step=attempted_step,
         durable_step=durable_step,
@@ -139,6 +138,9 @@ def _raise_injected(
         sample_ids=sample_ids,
         attempted_tokens=attempted_tokens,
     )
+    if observer is not None:
+        observer(failure)
+    raise failure
 
 
 def run_training(
@@ -150,6 +152,8 @@ def run_training(
     dataset_manifest: Path | None = None,
     failure_point: FailurePoint | None = None,
     failure_step: int | None = None,
+    failure_observer: Callable[[InjectedTrainingFailure], None] | None = None,
+    commit_observer: Callable[[int, int], None] | None = None,
 ) -> tuple[TinyTransformer, TrainingResult]:
     if stop_after_step is not None and stop_after_step < 1:
         raise ValueError("stop_after_step must be at least 1")
@@ -157,11 +161,9 @@ def run_training(
         raise ValueError(f"unknown failure point {failure_point!r}")
     if failure_step is not None and failure_point is None:
         raise ValueError("failure_step requires failure_point")
-    if (
-        resume_from is None
-        and output_dir.exists()
-        and any(output_dir.iterdir())
-    ):
+    if failure_observer is not None and failure_point is None:
+        raise ValueError("failure_observer requires failure_point")
+    if resume_from is None and output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(
             "fresh training requires an empty output directory; "
             "use --resume or choose a new output path"
@@ -202,9 +204,7 @@ def run_training(
             model=model,
             optimizer=optimizer,
             expected_config=config,
-            expected_data_fingerprint=(
-                None if legacy_synthetic else source.data_fingerprint
-            ),
+            expected_data_fingerprint=(None if legacy_synthetic else source.data_fingerprint),
             expected_tokenizer_fingerprint=(
                 None if legacy_synthetic else source.tokenizer_fingerprint
             ),
@@ -218,8 +218,7 @@ def run_training(
         losses = [float(value) for value in payload["losses"]]
         batch_ids = [str(value) for value in payload.get("batch_ids", [])]
         sample_ids = [
-            tuple(str(sample_id) for sample_id in batch)
-            for batch in payload.get("sample_ids", [])
+            tuple(str(sample_id) for sample_id in batch) for batch in payload.get("sample_ids", [])
         ]
         if legacy_synthetic and not batch_ids:
             for batch_index in range(start_step):
@@ -276,6 +275,7 @@ def run_training(
                 batch_id=prepared.batch_id,
                 sample_ids=prepared.sample_ids,
                 attempted_tokens=attempted_tokens,
+                observer=failure_observer,
             )
 
         optimizer.zero_grad(set_to_none=True)
@@ -290,6 +290,7 @@ def run_training(
                 batch_id=prepared.batch_id,
                 sample_ids=prepared.sample_ids,
                 attempted_tokens=attempted_tokens,
+                observer=failure_observer,
             )
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -302,6 +303,7 @@ def run_training(
                 batch_id=prepared.batch_id,
                 sample_ids=prepared.sample_ids,
                 attempted_tokens=attempted_tokens,
+                observer=failure_observer,
             )
 
         losses.append(float(loss.detach()))
@@ -310,8 +312,7 @@ def run_training(
         tokens_seen += attempted_tokens
         cursor = prepared.next_cursor
         should_checkpoint = (
-            attempted_step % config.checkpoint_every == 0
-            or attempted_step == final_step
+            attempted_step % config.checkpoint_every == 0 or attempted_step == final_step
         )
         if should_checkpoint:
             failure_injector = None
@@ -333,6 +334,7 @@ def run_training(
                             batch_id=batch_id_snapshot,
                             sample_ids=sample_ids_snapshot,
                             attempted_tokens=attempted_tokens_snapshot,
+                            observer=failure_observer,
                         )
 
             manifest = save_checkpoint(
@@ -353,6 +355,8 @@ def run_training(
             )
             checkpoint_generation = manifest.generation
             durable_step = attempted_step
+            if commit_observer is not None:
+                commit_observer(durable_step, checkpoint_generation)
 
     if not losses:
         raise ValueError("checkpoint already completed the requested training range")
