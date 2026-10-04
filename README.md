@@ -11,6 +11,31 @@ fingerprints as one recovery contract. It trains a small decoder-only PyTorch tr
 controlled failures, resumes from durable state, and compares the recovered run with an
 uninterrupted control.
 
+## Run the working prototype
+
+Start with the smallest useful test: **train → kill → restore → verify**.
+The parent kills a real worker during checkpoint publication. Fresh processes load
+the last committed checkpoint, replay the interrupted batch and compare the final
+model, optimizer, RNG, data cursor, losses and logits with an uninterrupted control.
+
+From this repository's root, on Linux or macOS with Python 3.12 and
+[uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --frozen --extra test
+uv run --frozen fttl-demo --output artifacts/my-demo-001
+```
+
+Open `artifacts/my-demo-001/preview/index.html` in your browser. It is an offline
+viewer of your **actual completed run**, with raw JSON links and all equality checks.
+Training runs in Python, not in the browser. Use a new output directory each time.
+After dependency installation, this demo needs no network, GPU, account or API key.
+
+The prototype trains a tiny randomly initialized transformer for six steps on six
+independently written CC0 fixture documents. It demonstrates recovery correctness,
+not language quality, arbitrary crash recovery, distributed scale or a production SLA.
+The verifier deliberately pauses one worker at a known boundary before sending SIGKILL.
+
 ## Verified now
 
 - A real corpus path using 656 pinned Python Enhancement Proposal documents.
