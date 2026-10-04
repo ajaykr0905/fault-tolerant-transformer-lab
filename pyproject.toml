@@ -17,6 +17,7 @@ dependencies = ["numpy>=2,<3", "torch>=2.10,<3"]
 test = ["pytest>=8,<9", "ruff>=0.9,<1"]
 
 [project.scripts]
+fttl-demo = "fttl.demo:main"
 fttl-train-smoke = "fttl.cli:main"
 fttl-compare-tuning = "fttl.ablation_cli:main"
 fttl-prepare-peps = "fttl.prepare_peps_cli:main"

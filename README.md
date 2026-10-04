@@ -1,15 +1,58 @@
 # Fault-Tolerant Transformer Lab
 
-A CPU-verifiable training-recovery system for one concrete question:
+**Train a tiny transformer. Kill its worker. Recover without changing the result.**
 
-> After a crash, incomplete checkpoint, or changed dataset, can training resume from the last
-> committed state without skipping data, duplicating data, accepting corruption, or silently
-> producing a different result?
+![Measured prototype: real SIGKILL, restore step 1, replay step 2, 16 equality checks pass and zero committed steps lost](docs/demo/preview.svg)
 
-This repository treats the model, optimizer, random-number generators, dataset cursor, and input
-fingerprints as one recovery contract. It trains a small decoder-only PyTorch transformer, injects
-controlled failures, resumes from durable state, and compares the recovered run with an
-uninterrupted control.
+This is a working CPU prototype, not a concept animation. The preview above comes from
+[a recorded run](docs/demo/process-recovery-report.json) at source revision
+[`9d5a901`](https://github.com/ajaykr0905/fault-tolerant-transformer-lab/commit/9d5a901797825a9e1a3cf0a426e894874f3bec9a).
+The [control](docs/demo/control/result.json) and [recovered](docs/demo/recovered/result.json)
+loss traces overlap exactly. All **16 equality checks passed**; **zero committed steps were lost**.
+The failed, uncommitted step was replayed—not skipped.
+
+## Run the working prototype
+
+Start with the smallest useful test: **train → kill → restore → verify**.
+The parent kills a real worker during checkpoint publication. Fresh processes load
+the last committed checkpoint, replay the interrupted batch and compare the final
+model, optimizer, RNG, data cursor, losses and logits with an uninterrupted control.
+
+From this repository's root, on Linux or macOS with Python 3.12 and
+[uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --frozen --extra test
+uv run --frozen fttl-demo --output artifacts/my-demo-001
+```
+
+Open `artifacts/my-demo-001/preview/index.html` in your browser. It is an offline
+viewer of your **actual completed run**, with raw JSON links and all equality checks.
+Training runs in Python, not in the browser. Use a new output directory each time.
+After dependency installation, this demo needs no network, GPU, account or API key.
+
+The prototype prepares six independently written CC0 fixture documents. It trains a
+tiny randomly initialized transformer for six steps, sampling 12 byte windows from
+two training documents—not the entire corpus. It demonstrates recovery correctness,
+not language quality, arbitrary crash recovery, distributed scale or a production SLA.
+The verifier deliberately pauses one worker at a known boundary before sending SIGKILL.
+
+### Why the recovery works
+
+Three first-principles requirements drive the design:
+
+1. **RAM can disappear.** Recover from a durable checkpoint, not the dead worker.
+2. **A step is a transaction.** Publish model, optimizer, RNG and cursor together;
+   an unfinished write must never become the newest recoverable checkpoint.
+3. **Recovery must be tested against a control.** Replay the same batch and compare
+   the complete result—not merely whether the restarted process stayed alive.
+
+The prototype saves step 1, kills the step-2 worker during checkpoint publication,
+starts a fresh process to restore and replay step 2, then finishes step 6. Its
+measured **1.913-second spawn-to-replay commit** includes process startup, imports,
+restore, replay, durable save and IPC on this local CPU; it is not a latency promise.
+Expand the equality checklist in the local viewer and inspect the linked raw JSON.
+GitHub displays the SVG preview; the HTML viewer runs locally after cloning.
 
 ## Verified now
 
@@ -134,6 +177,10 @@ pinned test-isolation fix. See the runbook for the original failure, both raw
 reports and the reproducible notebook. This measured run does not demonstrate
 arbitrary failure recovery or production reliability.
 
+The [uploaded executed notebook](notebooks/executed/colab_cuda_process_recovery_2026-10-05.ipynb)
+is preserved unchanged as historical evidence. The [launch notebook](notebooks/colab_cuda_process_recovery.ipynb)
+is a clean, tested template for a new run; preserving the export is not a new GPU-run claim.
+
 ## Research references and upstream work
 
 This lab studies reliable training, not language-model quality. Its workload is an independently
@@ -205,9 +252,10 @@ for the exact state machine and threat model.
 
 ## Evidence boundary
 
-This release proves deterministic recovery for a small, pinned CPU run. It does **not** prove model
-quality, pretrained-model fine-tuning, GPU process-death recovery, simultaneous multi-worker training,
-distributed scale, production readiness, or a service-level recovery objective. The original matrix uses
+The default prototype proves deterministic recovery for a small, pinned CPU run. The separate
+recorded T4 experiment above covers one GPU process-death boundary. Neither proves model
+quality, pretrained-model fine-tuning, simultaneous multi-worker training, distributed scale,
+production readiness, or a service-level recovery objective. The original matrix uses
 deterministic Python exceptions. The additional process verifier sends real `SIGKILL` to one paused
 worker at a selected boundary; the OS and filesystem remain running. Arbitrary asynchronous kills,
 filesystem faults, and physical power loss are not covered.
@@ -223,7 +271,7 @@ the payload and manifest.
 
 1. Arbitrary asynchronous kills, filesystem fault injection, and power-loss durability evidence.
 2. A pinned pretrained model with a real LoRA evaluation and retention checks.
-3. GPU process-death recovery and larger profiled workloads beyond the six-step reconstruction check.
+3. Broader GPU failure-boundary coverage and larger profiled workloads beyond the recorded six-step checks.
 4. Multi-process PyTorch Distributed Checkpoint or TorchFT experiments.
 5. Authenticated checkpoint manifests and remote object-store publication.
 

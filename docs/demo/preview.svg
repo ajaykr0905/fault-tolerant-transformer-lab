@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 670"
+role="img" aria-labelledby="title desc">
+<title id="title">Train. Kill. Recover. Verify.</title>
+<desc id="desc">Measured CPU recovery: 16 equality checks pass after a real SIGKILL.
+Both loss sequences overlap exactly. This is a local reliability proof, not model quality.</desc>
+<rect width="1120" height="670" rx="20" fill="#0b1220"/>
+<g font-family="system-ui, sans-serif">
+<text x="40" y="45" fill="#34d399" font-size="14">FAULT-TOLERANT TRANSFORMER LAB / WORKING PROTOTYPE</text>
+<text x="40" y="99" fill="#f8fafc" font-size="38" font-weight="700">A crash should not change the result.</text>
+<text x="40" y="132" fill="#94a3b8" font-size="17">Real worker death. Durable checkpoint. Exact replay.</text>
+<rect x="40" y="160" width="248" height="100" rx="12" fill="#142239"/><text x="58" y="195" fill="#60a5fa" font-size="16">01 TRAIN</text><text x="58" y="231" fill="#e2e8f0" font-size="18">Durable step 1</text><rect x="308" y="160" width="248" height="100" rx="12" fill="#142239"/><text x="326" y="195" fill="#fb7185" font-size="16">02 KILL</text><text x="326" y="231" fill="#e2e8f0" font-size="18">SIGKILL at step 2</text><rect x="576" y="160" width="248" height="100" rx="12" fill="#142239"/><text x="594" y="195" fill="#fbbf24" font-size="16">03 RESTORE</text><text x="594" y="231" fill="#e2e8f0" font-size="18">Replay step 2</text><rect x="844" y="160" width="248" height="100" rx="12" fill="#142239"/><text x="862" y="195" fill="#34d399" font-size="16">04 VERIFY</text><text x="862" y="231" fill="#e2e8f0" font-size="18">16/16 checks pass</text>
+<text x="40" y="302" fill="#e2e8f0" font-size="18">Per-step cross-entropy loss / zoomed axis</text>
+<text x="8" y="340" fill="#94a3b8" font-size="12">5.558</text>
+<text x="8" y="429" fill="#94a3b8" font-size="12">5.517</text>
+<line x1="70" y1="440" x2="1040" y2="440" stroke="#334155"/>
+<polyline points="70.00,408.05 264.00,382.42 458.00,335.00 652.00,411.88 846.00,386.32 1040.00,425.00" fill="none" stroke="#60a5fa" stroke-width="6"/>
+<polyline points="70.00,408.05 264.00,382.42 458.00,335.00 652.00,411.88 846.00,386.32 1040.00,425.00" fill="none" stroke="#34d399" stroke-width="3" stroke-dasharray="8 6"/>
+<text x="70" y="470" fill="#94a3b8" font-size="14">Step 1</text>
+<text x="890" y="470" fill="#94a3b8" font-size="14">Step 6 / exact overlap</text>
+<text x="40" y="517" fill="#60a5fa" font-size="15">Blue: uninterrupted control</text>
+<text x="370" y="517" fill="#34d399" font-size="15">Green dashed: recovered run</text>
+<text x="40" y="561" fill="#f8fafc" font-size="23">0 committed steps lost</text>
+<text x="370" y="561" fill="#f8fafc" font-size="23">1.913s spawn-to-replay commit</text>
+<text x="40" y="600" fill="#94a3b8" font-size="14">CPU / independent CC0 fixture / one paused worker killed during a declared boundary</text>
+<text x="40" y="626" fill="#94a3b8" font-size="14">Timing includes startup, restore, replay, save and IPC. Not a production recovery SLA.</text>
+</g></svg>

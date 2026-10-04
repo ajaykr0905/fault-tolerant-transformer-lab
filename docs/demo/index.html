@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fault-Tolerant Transformer Lab — measured demo</title>
+<style>
+body{margin:0;background:#0b1220;color:#e2e8f0;font:16px/1.6 system-ui,sans-serif}
+main{max-width:1120px;margin:30px auto;padding:0 20px}img{width:100%;height:auto}
+a{color:#93c5fd}strong{color:#6ee7b7}code{overflow-wrap:anywhere}
+section{padding:20px;border:1px solid #334155;border-radius:12px;margin:20px 0}
+li{margin:8px 0}summary{cursor:pointer}nav{display:flex;gap:24px;flex-wrap:wrap}
+</style><main><img src="preview.svg" alt="Train, kill, restore and verify: measured recovery proof">
+<section><h1>A real run, not a simulation</h1>
+<p>This page displays a completed experiment. It does not start training in your browser.
+A parent sent SIGKILL to one independent CPU worker at
+<b>during-checkpoint-write</b>. Fresh processes restored the checkpoint,
+replayed the interrupted batch and matched an independent control.</p>
+<p>Verified: 2026-10-04T20:17:25.282077+00:00 · exit code:
+-9 · 6 completed steps ·
+96 committed tokens.</p>
+<nav><a href="process-recovery-report.json">Raw recovery report</a>
+<a href="control/result.json">Control trace</a>
+<a href="recovered/result.json">Recovered trace</a></nav></section>
+<section><details open><summary>Inspect all 16 equality checks</summary>
+<ul><li><strong>PASS</strong> batch id sequence</li><li><strong>PASS</strong> completed steps</li><li><strong>PASS</strong> cursor</li><li><strong>PASS</strong> final checkpoint state</li><li><strong>PASS</strong> final logits digest</li><li><strong>PASS</strong> final logits tensors</li><li><strong>PASS</strong> final state digest</li><li><strong>PASS</strong> loss sequence</li><li><strong>PASS</strong> model tensors</li><li><strong>PASS</strong> optimizer tensors</li><li><strong>PASS</strong> rng state</li><li><strong>PASS</strong> run contract</li><li><strong>PASS</strong> run fingerprint</li><li><strong>PASS</strong> sample id sequence</li><li><strong>PASS</strong> staging cleanup</li><li><strong>PASS</strong> token count</li></ul></details>
+<p>Final state digest: <code>87a43ddb9b0dc1875614fe3577d652e47280afd410f056c2daeefcc3c0e45ba4</code></p>
+<p>Code revision: <code>9d5a901797825a9e1a3cf0a426e894874f3bec9a</code></p></section>
+<section><h2>Reproduce from the repository root</h2>
+<pre>uv sync --frozen --extra test
+uv run --frozen fttl-demo --output artifacts/my-demo-001</pre>
+<p>Open <code>artifacts/my-demo-001/preview/index.html</code>.
+Use a new output directory for each run. Linux/macOS, Python 3.12; CPU only.
+The six-document CC0 fixture is independently written, not actual PEP text.</p>
+<h2>What this does not prove</h2><ul><li>This report proves recovery after one parent-controlled POSIX SIGKILL in this pinned CPU run.</li><li>The boundary handshake pauses one worker; it does not sample arbitrary asynchronous kill times.</li><li>The operating system and filesystem remain running; this is not a power-loss durability proof.</li><li>It does not measure model quality, GPU behavior, distributed scale, or production readiness.</li><li>Timing includes local process startup and IPC; it is not a benchmark or service-level objective.</li><li>Checkpoint hashes detect corruption but do not authenticate attacker-controlled artifacts.</li></ul></section></main></html>

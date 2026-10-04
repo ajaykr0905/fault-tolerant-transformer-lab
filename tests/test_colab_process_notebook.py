@@ -1,11 +1,24 @@
 """Notebook contracts only; these tests are not measured GPU evidence."""
 
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
 
 import pytest
+
+
+def test_uploaded_executed_export_is_preserved_byte_for_byte():
+    path = Path(__file__).resolve().parents[1] / (
+        "notebooks/executed/colab_cuda_process_recovery_2026-10-05.ipynb"
+    )
+    content = path.read_bytes()
+    git_blob = b"blob " + str(len(content)).encode() + b"\0" + content
+    assert hashlib.sha1(git_blob).hexdigest() == "d833c4db9580e8a4796697a9a51003f00073cccb"
+    notebook = json.loads(content)
+    assert any(cell.get("outputs") for cell in notebook["cells"])
+
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks/colab_cuda_process_recovery.ipynb"
 

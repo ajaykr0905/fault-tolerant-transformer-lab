@@ -60,6 +60,9 @@ jobs:
             --config configs/smoke.json \
             --output "${RUNNER_TEMP}/fttl-ci-tuning/result.json"
 
+      - name: Run the working prototype and export its offline viewer
+        run: uv run --frozen fttl-demo --output "${RUNNER_TEMP}/fttl-ci-demo"
+
       - name: Verify checks did not modify tracked files
         run: |
           git diff --check
