@@ -1,0 +1,86 @@
+{
+  "batch_ids": [
+    "f15f268afbdf22264a4ade6759f858bcfc1dd71fa0f007e3cd112a95db4e7ec9",
+    "16aaa26478129ef8e2e43d55b547630cdcc067fa66164be4494f6e28a2fcce25",
+    "d48e06959354f05ae2cd8c58599427dcbe0454db6bd8176f7af2372527b7d570",
+    "938e0c7f08f47ef58dc31f910bae9267e8642054ab7b53d97eb7df0eff8cb2e0",
+    "f4b69567f88f35819ff8db9f62b9e4b456094e6dda31f1dcb536cf8f0804b585",
+    "e44fb3478ec43137bbbae579d12f69325a0ef3750fb3d9ca920ec47a73a3ced7"
+  ],
+  "checkpoint": "checkpoints",
+  "checkpoint_generation": 6,
+  "checkpoint_load_seconds": 0.017937,
+  "code_fingerprint": "5114e970d4b49e7905145e57561be917fc2e6c95847a43d996bd4a2f2ae8d31e",
+  "code_revision": "9d5a901797825a9e1a3cf0a426e894874f3bec9a",
+  "config_fingerprint": "46422313a1aa4ad05cb9755226f87f3405e520c64d57396220791558491c0325",
+  "data_fingerprint": "029479b760ea4562801adb777e527fdfa13f52eb803107a1fc3462244aa20da6",
+  "device": "cpu",
+  "elapsed_seconds": 0.146924,
+  "final_cursor": {
+    "batch_id": "f5344ec624cdc893da98cdf5b64de9746d89f5b53ce24eac3ff47d2f56e125d3",
+    "batch_index": 6,
+    "document_id": "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19",
+    "epoch": 0,
+    "next_sample_ids": [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000048",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000048"
+    ],
+    "schema_version": 1,
+    "token_window_offset": 48
+  },
+  "final_logits_digest": "08287a1600a9428918ffde1037e312ff7f26af517b4eea231c176ffe92ca55f9",
+  "final_loss": 5.517043113708496,
+  "final_state_digest": "87a43ddb9b0dc1875614fe3577d652e47280afd410f056c2daeefcc3c0e45ba4",
+  "initial_loss": 5.524830341339111,
+  "limitations": [
+    "This run verifies deterministic CPU recovery behavior, not model quality.",
+    "It does not demonstrate GPU scale, distributed training, or production readiness.",
+    "Full resume checkpoints are trusted local artifacts; SHA-256 is not authentication."
+  ],
+  "losses": [
+    5.524830341339111,
+    5.536611080169678,
+    5.558400630950928,
+    5.523070335388184,
+    5.534816741943359,
+    5.517043113708496
+  ],
+  "model_digest": "aec99e835d955f4a1151b07b14ed60f43f84d95b0b358f32c3f38eef10cc18a4",
+  "optimizer_digest": "b121d69b2900f41bcb0356d841580295b5302a694402f5a93ba9f37ff60248af",
+  "python_version": "3.12.12",
+  "recovered_from_generation": 2,
+  "rng_digest": "5b7b20fe0124a8b7ad4986f06e347bccef26e6a6781f63034fd32c4333bc4de3",
+  "run_contract_fingerprint": "7ba503970dd7419551eb701a3e675c3c5f467ce490a6e54b6fed0fd62859b942",
+  "run_fingerprint": "9488411d8eeb74e724352f534349b72ee7546532f10dea50060a4432692c0ea7",
+  "sample_ids": [
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000000",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000000"
+    ],
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000008",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000008"
+    ],
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000016",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000016"
+    ],
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000024",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000024"
+    ],
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000032",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000032"
+    ],
+    [
+      "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19:000000000040",
+      "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e:000000000040"
+    ]
+  ],
+  "schema_version": 2,
+  "steps": 6,
+  "tokenizer_fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+  "tokens_seen": 96,
+  "torch_version": "2.13.0"
+}

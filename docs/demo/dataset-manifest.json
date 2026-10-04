@@ -1,0 +1,76 @@
+{
+  "counts": {
+    "documents": 6,
+    "tokens_including_eod": 961,
+    "utf8_bytes": 955
+  },
+  "dataset_fingerprint": "029479b760ea4562801adb777e527fdfa13f52eb803107a1fc3462244aa20da6",
+  "documents": {
+    "byte_length": 2271,
+    "path": "documents.jsonl",
+    "sha256": "93b4bdbc67a659d9419b8b66cfe44965d5cf377cf08a9635fe7e4dd5ee82edfc"
+  },
+  "license": {
+    "description": "CC0-1.0",
+    "limitations": [
+      "Independently written demo fixture, not actual PEP documents."
+    ]
+  },
+  "preprocessing": {
+    "document_order": "document_id ascending",
+    "fingerprint": "e13e11b3dba58cc45a0f02cf266e23400bb2c675dbe6fc420a12fa865a831fdb",
+    "name": "pep-jsonl-normalize-v1",
+    "newlines": "LF with exactly one terminal LF",
+    "split": "first 64 bits of SHA-256(document_id), modulo 1000; train <800, validation <900, test otherwise",
+    "unicode_normalization": "NFC"
+  },
+  "schema": "DatasetManifestV1",
+  "source": {
+    "artifact_byte_length": 1351,
+    "artifact_kind": "jsonl",
+    "artifact_sha256": "da4e4fd7ac86f2129864570c0f288378c2a5063ec3079ae07ff6b29c918cae67",
+    "compressed_byte_length": 1351,
+    "compressed_sha256": "da4e4fd7ac86f2129864570c0f288378c2a5063ec3079ae07ff6b29c918cae67",
+    "path": "public_domain_peps_fixture.jsonl",
+    "repository": "fttl://tests/public-domain-pep-fixture",
+    "revision": "fixture-v1",
+    "url": "https://huggingface.co/datasets/fttl://tests/public-domain-pep-fixture/resolve/fixture-v1/public_domain_peps_fixture.jsonl"
+  },
+  "splits": {
+    "test": {
+      "document_count": 2,
+      "document_ids": [
+        "3fbfd5d990a9f6cc3a1b9abcead48791d5b80e84ad0e8cacee19dc74ee7d932a",
+        "dbfd5f97282d8693a18de6ef6671f4c4e88b0a340b6c70abf639893485058441"
+      ],
+      "document_ids_sha256": "209950a71de155fcfa3b3275e419a17005975284b887107b6aed13e8821b154a"
+    },
+    "train": {
+      "document_count": 2,
+      "document_ids": [
+        "bd481ce04a7b1bc472d5eec0195d0abbf50a3db5f762a85074caafd2420b5b19",
+        "fbab3994e3ea4792f595cd3c89b9054a929111bb1c3e5b1e6dec524c91b2b31e"
+      ],
+      "document_ids_sha256": "d813cad93276f464b85c2e8297899513dbe2ffd4b8882fef1248c4a367ab4de9"
+    },
+    "validation": {
+      "document_count": 2,
+      "document_ids": [
+        "868f8e9f447989b6c040bf48a25140a232ba8821591412ba902b3938f700fb9f",
+        "9344827f1582a5f08e84d43c3eca57167974b6da3c488f06a049121770717a1d"
+      ],
+      "document_ids_sha256": "27e819ce647e970cdbd9607811bcb7c92d1926c59555857b0af1631a996b70a9"
+    }
+  },
+  "tokenizer": {
+    "byte_ids": [
+      0,
+      255
+    ],
+    "end_of_document_id": 256,
+    "fingerprint": "fbe3aa2431f27491ba3bf813c9b9054782af25af4e318c671a631d3166ed80a3",
+    "name": "utf8-byte-v1",
+    "text_encoding": "UTF-8",
+    "vocab_size": 257
+  }
+}

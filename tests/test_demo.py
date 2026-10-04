@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from fttl.demo import export_preview, run_demo
+from fttl.config import ExperimentConfig
+from fttl.demo import FIXTURE_SHA256, export_preview, run_demo
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/public_domain_peps_fixture.jsonl"
@@ -130,3 +131,28 @@ def test_overlapping_preview_directory_is_rejected(tmp_path, relative):
     with pytest.raises(ValueError):
         run_demo(output, fixture=FIXTURE, preview_dir=preview)
     assert not output.exists()
+
+
+def test_readme_preview_is_bound_to_the_published_run_and_public_fixture():
+    preview = ROOT / "docs/demo"
+    report = json.loads((preview / "process-recovery-report.json").read_text())
+    control = json.loads((preview / "control/result.json").read_text())
+    recovered = json.loads((preview / "recovered/result.json").read_text())
+    config = ExperimentConfig.from_json((preview / "config.json").read_text())
+    manifest = json.loads((preview / "dataset-manifest.json").read_text())
+    assert report["code_revision"] == "9d5a901797825a9e1a3cf0a426e894874f3bec9a"
+    assert report["exact_equality"] and len(report["equality"]) == 16
+    assert all(value is True for value in report["equality"].values())
+    assert report["config_fingerprint"] == config.fingerprint()
+    assert manifest["source"]["compressed_sha256"] == FIXTURE_SHA256
+    assert manifest["counts"]["documents"] == 6
+    assert report["dataset_fingerprint"] == manifest["dataset_fingerprint"]
+    for name in ("losses", "batch_ids", "sample_ids", "final_state_digest"):
+        assert control[name] == recovered[name]
+    assert report["final_state_digest"] == recovered["final_state_digest"]
+    assert report["interrupted_exitcode"] == -9
+    assert report["selected_step"] == 1 and report["completed_steps"] == 6
+    assert report["durable_committed_steps_lost"] == 0
+    assert report["failed_sample_ids"] == report["replayed_sample_ids"]
+    assert not list(preview.rglob("*.pt"))
+    ET.parse(preview / "preview.svg")
