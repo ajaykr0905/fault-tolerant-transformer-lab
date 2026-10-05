@@ -16,7 +16,7 @@ import torch
 
 from fttl.config import ExperimentConfig
 from fttl.data import PreparedDatasetBatchSource
-from fttl.dataset import load_dataset_manifest
+from fttl.dataset import PreparedDatasetSnapshot, load_dataset_snapshot
 from fttl.evaluation import EvaluationResultV1, evaluate_held_out
 from fttl.lora import inject_lora
 from fttl.model import TinyTransformer
@@ -134,7 +134,7 @@ def _train_arm(
     model: TinyTransformer,
     config: ExperimentConfig,
     source: PreparedDatasetBatchSource,
-    manifest_path: Path,
+    manifest_path: Path | PreparedDatasetSnapshot,
     *,
     mode: str,
     validation_before: EvaluationResultV1,
@@ -269,10 +269,9 @@ def compare_public_tuning(
     caller_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
     try:
         with torch.device("cpu"):
-            manifest = load_dataset_manifest(manifest_path)
-            source = PreparedDatasetBatchSource.from_manifest(config, manifest_path, split="train")
-            if source.data_fingerprint != manifest.fingerprint():
-                raise ValueError("training dataset identity changed during loading")
+            snapshot = load_dataset_snapshot(manifest_path)
+            manifest = snapshot.manifest
+            source = PreparedDatasetBatchSource.from_snapshot(config, snapshot, split="train")
             random.seed(config.seed)
             np.random.seed(config.seed)
             # This experiment must not seed or initialize any CUDA generators.
@@ -288,10 +287,10 @@ def compare_public_tuning(
             if state_digest(_base_state(lora, base_names, summary.replaced_modules)) != base_digest:
                 raise ValueError("LoRA injection changed base weights")
             full_before = evaluate_held_out(
-                full, manifest_path, split="validation", max_tokens=max_eval_tokens
+                full, snapshot, split="validation", max_tokens=max_eval_tokens
             )
             lora_before = evaluate_held_out(
-                lora, manifest_path, split="validation", max_tokens=max_eval_tokens
+                lora, snapshot, split="validation", max_tokens=max_eval_tokens
             )
             for evaluation in (full_before, lora_before):
                 if (
@@ -354,7 +353,7 @@ def compare_public_tuning(
                 full,
                 config,
                 source,
-                manifest_path,
+                snapshot,
                 mode="full",
                 validation_before=full_before,
                 initial_logits_digest=full_logits,
@@ -367,7 +366,7 @@ def compare_public_tuning(
                 lora,
                 config,
                 source,
-                manifest_path,
+                snapshot,
                 mode="lora",
                 validation_before=lora_before,
                 initial_logits_digest=lora_logits,

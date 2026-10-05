@@ -5,6 +5,10 @@ initialized tiny Transformer weights. It consumes a verified prepared dataset, t
 the train split, and evaluates an ordered validation prefix before and after each arm. No test
 split is used for selection. This is not pretrained-model fine-tuning.
 
+One immutable, verified manifest/document snapshot supplies both training arms and all validation
+passes. The loader checks the captured bytes it actually parses; a later dataset-directory change
+cannot silently relabel the experiment's input. This is integrity binding, not source authentication.
+
 ## Network-free working prototype
 
 Run these from the repository root on Linux or macOS, with fresh output paths. Environment setup

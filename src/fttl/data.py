@@ -9,6 +9,7 @@ from typing import Protocol, Sequence
 import torch
 
 from fttl.config import ExperimentConfig
+from fttl.dataset import PreparedDatasetSnapshot, load_dataset_snapshot
 
 
 @dataclass(frozen=True)
@@ -232,13 +233,20 @@ class PreparedDatasetBatchSource:
         *,
         split: str = "train",
     ) -> "PreparedDatasetBatchSource":
-        from fttl.dataset import load_dataset_manifest, load_prepared_documents
+        return cls.from_snapshot(config, load_dataset_snapshot(manifest_path), split=split)
 
-        manifest = load_dataset_manifest(manifest_path)
-        documents = load_prepared_documents(manifest_path, split=split)
+    @classmethod
+    def from_snapshot(
+        cls,
+        config: ExperimentConfig,
+        snapshot: PreparedDatasetSnapshot,
+        *,
+        split: str = "train",
+    ) -> "PreparedDatasetBatchSource":
+        manifest = snapshot.manifest
         return cls(
             config,
-            documents,
+            snapshot.documents_for(split),
             data_fingerprint=manifest.fingerprint(),
             tokenizer_fingerprint=manifest.tokenizer_fingerprint,
         )
