@@ -77,6 +77,38 @@ class CheckpointIntegrityError(OSError):
 FailureInjector = Callable[[str], None]
 
 
+def _validate_schema(value: Any, expected: int, label: str) -> None:
+    if type(value) is not int:
+        raise CheckpointIntegrityError(f"checkpoint {label} schema must be an integer")
+    if value != expected:
+        raise CheckpointMismatchError(f"unsupported checkpoint {label} schema")
+
+
+def _validate_counter(value: Any, label: str, minimum: int = 0) -> None:
+    if type(value) is not int or value < minimum:
+        raise CheckpointIntegrityError(
+            f"checkpoint {label} must be an integer greater than or equal to {minimum}"
+        )
+
+
+def _validate_cursor(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise CheckpointIntegrityError("checkpoint cursor must be an object or null")
+    # Generic history cursors remain supported; versioned training cursors use
+    # the same strict constructor as their data-source consumers.
+    if "schema_version" in value:
+        from fttl.data import TrainingCursorV1
+
+        try:
+            TrainingCursorV1.from_dict(value)
+        except (TypeError, ValueError) as error:
+            raise CheckpointIntegrityError(
+                f"checkpoint training cursor is invalid: {error}"
+            ) from error
+
+
 @dataclass(frozen=True)
 class CheckpointManifestV2:
     """Public metadata binding one checkpoint generation to its training inputs."""
@@ -94,6 +126,14 @@ class CheckpointManifestV2:
     run_contract_fingerprint: str
     state_keys: tuple[str, ...]
     cursor: dict[str, Any] | None
+
+    def __post_init__(self) -> None:
+        _validate_schema(self.schema_version, CHECKPOINT_SCHEMA_VERSION, "manifest")
+        _validate_counter(self.generation, "generation", 1)
+        _validate_counter(self.state_bytes, "byte length", 1)
+        _validate_counter(self.completed_step, "completed step")
+        _validate_counter(self.tokens_seen, "token count")
+        _validate_cursor(self.cursor)
 
     @property
     def dataset_fingerprint(self) -> str:
@@ -128,16 +168,7 @@ class CheckpointManifestV2:
             raise CheckpointIntegrityError(
                 f"checkpoint manifest is missing keys: {', '.join(missing)}"
             )
-        if value["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-            raise CheckpointMismatchError("unsupported checkpoint manifest schema")
-        for field, label in (
-            ("generation", "generation"),
-            ("state_bytes", "byte length"),
-            ("completed_step", "completed step"),
-            ("tokens_seen", "token count"),
-        ):
-            if not isinstance(value[field], int) or isinstance(value[field], bool):
-                raise CheckpointIntegrityError(f"checkpoint {label} must be an integer")
+        _validate_schema(value["schema_version"], CHECKPOINT_SCHEMA_VERSION, "manifest")
         if not isinstance(value["state_keys"], list) or not all(
             isinstance(item, str) for item in value["state_keys"]
         ):
@@ -467,8 +498,10 @@ def _load_generation_payload(
         raise CheckpointIntegrityError(
             f"checkpoint state is missing keys: {', '.join(missing)}"
         )
-    if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-        raise CheckpointMismatchError("unsupported checkpoint state schema")
+    _validate_schema(payload["schema_version"], CHECKPOINT_SCHEMA_VERSION, "state")
+    _validate_counter(payload["step"], "completed step")
+    _validate_counter(payload["tokens_seen"], "token count")
+    _validate_cursor(payload["cursor"])
     if payload.get("config_fingerprint") != manifest.config_fingerprint:
         raise CheckpointIntegrityError("checkpoint state and manifest configuration differ")
     if payload.get("data_fingerprint") != manifest.data_fingerprint:
@@ -586,6 +619,10 @@ def save_checkpoint(
         cursor_value = None if cursor is None else _json_compatible(cursor)
         if cursor_value is not None and not isinstance(cursor_value, dict):
             raise ValueError("checkpoint cursor must be an object or null")
+        try:
+            _validate_cursor(cursor_value)
+        except CheckpointIntegrityError as error:
+            raise ValueError(str(error)) from error
         json.dumps(cursor_value, allow_nan=False)
         batch_id_values = [str(value) for value in (batch_ids or [])]
         sample_id_values = [[str(sample_id) for sample_id in batch] for batch in (sample_ids or [])]
