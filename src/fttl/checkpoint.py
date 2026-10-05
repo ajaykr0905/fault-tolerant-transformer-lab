@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -23,6 +24,7 @@ from typing import Any, Callable, Mapping
 import torch
 
 from fttl.config import ExperimentConfig
+from fttl.numerical import require_finite_state
 from fttl.state import capture_rng_state, restore_rng_state
 
 CHECKPOINT_SCHEMA_VERSION = 2
@@ -309,6 +311,30 @@ def _read_manifest(path: Path) -> CheckpointManifestV2:
     return CheckpointManifestV2.from_dict(raw)
 
 
+def _require_dense_checkpoint_state(value: Any, label: str) -> None:
+    if isinstance(value, torch.Tensor):
+        if value.layout != torch.strided or value.device.type == "meta":
+            raise ValueError(f"{label} must be a materialized dense tensor")
+    elif isinstance(value, Mapping):
+        for name, item in value.items():
+            _require_dense_checkpoint_state(item, f"{label}.{name}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for index, item in enumerate(value):
+            _require_dense_checkpoint_state(item, f"{label}[{index}]")
+
+
+def _validate_checkpoint_numerics(value: Any) -> None:
+    _require_dense_checkpoint_state(value, "checkpoint state")
+    require_finite_state(value, "checkpoint state")
+
+
+def _validate_stored_numerics(payload: dict[str, Any]) -> None:
+    try:
+        _validate_checkpoint_numerics(payload)
+    except (FloatingPointError, ValueError, TypeError, RuntimeError, OverflowError) as error:
+        raise CheckpointIntegrityError(f"checkpoint numerical state is invalid: {error}") from error
+
+
 def _validate_generation_files(generation_dir: Path) -> CheckpointManifestV2:
     manifest = _read_manifest(generation_dir / MANIFEST_FILENAME)
     expected_name = f"generation-{manifest.generation:08d}"
@@ -439,6 +465,7 @@ def _load_generation_payload(
         raise CheckpointIntegrityError("checkpoint state and manifest token counts differ")
     if payload.get("cursor") != manifest.cursor:
         raise CheckpointIntegrityError("checkpoint state and manifest cursors differ")
+    _validate_stored_numerics(payload)
     return payload, manifest
 
 
@@ -520,6 +547,27 @@ def save_checkpoint(
         if "torch_cuda" in rng_state_value:
             validate_cuda_rng_state(rng_state_value, torch.device("cuda:0"))
 
+    payload: dict[str, Any] = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "config": config.to_dict(),
+        "config_fingerprint": config.fingerprint(),
+        "data_fingerprint": data_fingerprint,
+        "tokenizer_fingerprint": tokenizer_fingerprint,
+        "run_contract_fingerprint": run_contract_fingerprint,
+        "model": copy.deepcopy(model.state_dict()),
+        "optimizer": copy.deepcopy(optimizer.state_dict()),
+        "step": step,
+        "tokens_seen": tokens_seen,
+        "losses": loss_values,
+        "cursor": cursor_value,
+        "batch_ids": batch_id_values,
+        "sample_ids": sample_id_values,
+        "rng_state": capture_rng_state() if rng_state_value is None else rng_state_value,
+    }
+    _validate_checkpoint_numerics(
+        {"payload": payload, "runtime_buffers": dict(model.named_buffers(remove_duplicate=False))}
+    )
+
     root = Path(path)
     if root.exists() and not root.is_dir():
         raise CheckpointMismatchError(
@@ -541,23 +589,6 @@ def save_checkpoint(
     published_dir = root / generation_name
     temporary_dir.mkdir()
 
-    payload: dict[str, Any] = {
-        "schema_version": CHECKPOINT_SCHEMA_VERSION,
-        "config": config.to_dict(),
-        "config_fingerprint": config.fingerprint(),
-        "data_fingerprint": data_fingerprint,
-        "tokenizer_fingerprint": tokenizer_fingerprint,
-        "run_contract_fingerprint": run_contract_fingerprint,
-        "model": model.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "step": step,
-        "tokens_seen": tokens_seen,
-        "losses": loss_values,
-        "cursor": cursor_value,
-        "batch_ids": batch_id_values,
-        "sample_ids": sample_id_values,
-        "rng_state": capture_rng_state() if rng_state_value is None else rng_state_value,
-    }
     state_path = temporary_dir / STATE_FILENAME
     with state_path.open("wb") as handle:
         torch.save(payload, handle)
@@ -629,6 +660,7 @@ def _load_legacy_checkpoint(
         raise CheckpointMismatchError(
             "checkpoint configuration does not match experiment"
         )
+    _validate_stored_numerics(payload)
     return payload
 
 
@@ -648,7 +680,9 @@ def load_checkpoint(
     V2 integrity, schema, size, digest, and fingerprint checks happen before
     deserialization. Corrupt newest generations fall back to the preceding
     valid committed generation. Contract mismatches are rejected rather than
-    silently falling back. The trusted-local v1 migration has no sidecar
+    silently falling back. Numerically invalid payloads also fall back before
+    receiver mutation, even when RNG restoration is disabled.
+    The trusted-local v1 migration has no sidecar
     length or digest and is restricted to the synthetic compatibility path.
     """
 
