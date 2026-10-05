@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -95,6 +96,23 @@ def restore_rng_state(state: Mapping[str, Any]) -> None:
     torch.set_rng_state(state["torch_cpu"])
 
 
+def _mapping_key_order(key: Any) -> tuple[str, Any]:
+    key_type = type(key)
+    if key_type is str:
+        return "str", key
+    if key is None:
+        return "null", 0
+    if key_type is bool:
+        return "bool", key
+    if key_type is int:
+        return "int", key
+    if key_type is float:
+        if not math.isfinite(key):
+            raise ValueError("state mapping keys must be finite")
+        return "float", key
+    raise TypeError("state mapping keys must be primitive strings, numbers, booleans, or null")
+
+
 def _update_digest(hasher: Any, value: Any) -> None:
     if isinstance(value, torch.Tensor):
         tensor = value.detach().cpu().contiguous()
@@ -107,8 +125,12 @@ def _update_digest(hasher: Any, value: Any) -> None:
         return
     if isinstance(value, Mapping):
         hasher.update(b"mapping{")
-        for key in sorted(value, key=lambda item: str(item)):
-            _update_digest(hasher, str(key))
+        for key in sorted(value, key=_mapping_key_order):
+            if type(key) is not str:
+                # String keys retain their historical encoding; other primitives
+                # receive an unambiguous type tag before their JSON scalar bytes.
+                hasher.update(f"{_mapping_key_order(key)[0]}-key\0".encode("ascii"))
+            _update_digest(hasher, key)
             _update_digest(hasher, value[key])
         hasher.update(b"}")
         return
