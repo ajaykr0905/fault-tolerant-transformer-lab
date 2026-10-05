@@ -1,0 +1,6 @@
+{"id":"fixture-01","metadata":{"license":"CC0-1.0"},"text":"Proposal: Durable counters\n\nA counter update becomes visible only after its journal record is synced. Readers ignore incomplete records and resume from the last complete boundary.\n"}
+{"id":"fixture-02","metadata":{"license":"CC0-1.0"},"text":"Proposal: Stable work identifiers\n\nEach work item receives an identifier derived from its source identity. Reordering input files does not change that identifier.\n"}
+{"id":"fixture-04","metadata":{"license":"CC0-1.0"},"text":"Proposal: Replayable batches\n\nA rejected training step must not consume its batch. The next attempt uses the same sample identifiers before advancing the cursor.\n"}
+{"id":"fixture-20","metadata":{"license":"CC0-1.0"},"text":"Proposal: Atomic publication\n\nWriters create a temporary artifact, flush it, rename it atomically, and then synchronize the containing directory.\n"}
+{"id":"fixture-05","metadata":{"license":"CC0-1.0"},"text":"Proposal: Content validation\n\nConsumers verify byte length and digest before parsing an artifact. A mismatch is an explicit failure rather than a warning.\n"}
+{"id":"fixture-13","metadata":{"license":"CC0-1.0"},"text":"Proposal: Honest experiments\n\nReports separate measured recovery behavior from untested claims about scale, model quality, and production readiness.\n"}

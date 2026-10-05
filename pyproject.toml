@@ -34,6 +34,9 @@ fttl-benchmark-inference = "fttl.inference_benchmark:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fttl = ["assets/*.jsonl"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

@@ -30,6 +30,8 @@ Open `artifacts/my-demo-001/preview/index.html` in your browser. It is an offlin
 viewer of your **actual completed run**, with raw JSON links and all equality checks.
 Training runs in Python, not in the browser. Use a new output directory each time.
 After dependency installation, this demo needs no network, GPU, account or API key.
+Its pinned CC0 fixture ships with the package, so the installed `fttl-demo`
+also works outside the checkout.
 
 Then [generate bounded byte tokens from the recovered checkpoint](docs/generation.md).
 The report binds inference to the verified model and dataset; it demonstrates a
