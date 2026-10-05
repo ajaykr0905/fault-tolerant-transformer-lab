@@ -36,6 +36,8 @@ also works outside the checkout.
 Then [generate bounded byte tokens from the recovered checkpoint](docs/generation.md).
 The report binds inference to the verified model and dataset; it demonstrates a
 working training-to-inference path, not useful language quality.
+For an HTTP demonstration, [serve that recovered model on loopback](docs/serving.md)
+and inspect its checkpoint-linked readiness before generating byte tokens.
 
 The prototype prepares six independently written CC0 fixture documents. It trains a
 tiny randomly initialized transformer for six steps, sampling 12 byte windows from

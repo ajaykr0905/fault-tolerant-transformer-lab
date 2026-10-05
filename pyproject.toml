@@ -30,6 +30,7 @@ fttl-evaluate-checkpoint = "fttl.evaluation_cli:main"
 fttl-generate = "fttl.generation_cli:main"
 fttl-verify-inference-parity = "fttl.inference_parity:main"
 fttl-benchmark-inference = "fttl.inference_benchmark:main"
+fttl-serve = "fttl.serving_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
