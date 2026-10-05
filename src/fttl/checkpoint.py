@@ -461,6 +461,7 @@ def _load_generation_payload(
     generation_dir: Path,
     *,
     model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     expected_config_fingerprint: str,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -479,7 +480,9 @@ def _load_generation_payload(
     except OSError as error:
         raise CheckpointIntegrityError("checkpoint state snapshot is unreadable") from error
     if len(state_snapshot) != manifest.state_bytes:
-        raise CheckpointIntegrityError("checkpoint state snapshot byte length does not match manifest")
+        raise CheckpointIntegrityError(
+            "checkpoint state snapshot byte length does not match manifest"
+        )
     if hashlib.sha256(state_snapshot).hexdigest() != manifest.state_sha256:
         raise CheckpointIntegrityError("checkpoint state snapshot SHA-256 does not match manifest")
     try:
@@ -519,7 +522,58 @@ def _load_generation_payload(
         raise CheckpointIntegrityError("checkpoint state and manifest cursors differ")
     _validate_stored_numerics(payload)
     _validate_model_aliases(model, payload["model"])
+    _validate_adam_state(optimizer, payload["optimizer"])
     return payload, manifest
+
+
+def _validate_adam_state(optimizer: torch.optim.Optimizer, value: Any) -> None:
+    if type(optimizer) not in (torch.optim.Adam, torch.optim.AdamW):
+        return
+
+    def invalid() -> None:
+        raise CheckpointIntegrityError(
+            "checkpoint Adam initialized state or parameter binding is invalid"
+        )
+
+    if not isinstance(value, Mapping):
+        invalid()
+    groups, states = value.get("param_groups"), value.get("state")
+    if not isinstance(groups, list) or not isinstance(states, Mapping):
+        invalid()
+    if len(groups) != len(optimizer.param_groups):
+        invalid()
+    bindings = {}
+    for saved, current in zip(groups, optimizer.param_groups, strict=True):
+        if not isinstance(saved, Mapping) or not isinstance(saved.get("params"), list):
+            invalid()
+        if len(saved["params"]) != len(current["params"]):
+            invalid()
+        for key, parameter in zip(saved["params"], current["params"], strict=True):
+            if type(key) is not int or (key in bindings and bindings[key][0] is not parameter):
+                invalid()
+            bindings[key] = (parameter, saved.get("amsgrad", False))
+    for key, state in states.items():
+        if type(key) is not int or key not in bindings or not isinstance(state, Mapping):
+            invalid()
+        if not state:
+            continue
+        parameter, amsgrad = bindings[key]
+        required = {"exp_avg", "exp_avg_sq", "step"}
+        if amsgrad:
+            required.add("max_exp_avg_sq")
+        if not required.issubset(state):
+            invalid()
+        for name in required.difference({"step"}):
+            moment = state[name]
+            if not isinstance(moment, torch.Tensor) or moment.shape != parameter.shape:
+                invalid()
+        step = state["step"]
+        if isinstance(step, torch.Tensor):
+            if step.numel() != 1 or step.is_complex() or step.dtype == torch.bool:
+                invalid()
+            step = step.item()
+        if type(step) not in (int, float) or step < 0:
+            invalid()
 
 
 def _validate_model_aliases(model: torch.nn.Module, state: Mapping[str, Any]) -> None:
@@ -696,6 +750,7 @@ def save_checkpoint(
     )
     try:
         _validate_model_aliases(model, payload["model"])
+        _validate_adam_state(optimizer, payload["optimizer"])
     except CheckpointIntegrityError as error:
         raise ValueError(str(error)) from error
 
@@ -707,16 +762,24 @@ def save_checkpoint(
     root.mkdir(parents=True, exist_ok=True)
     with _checkpoint_writer_lock(root, writer_lock_timeout):
         return _publish_checkpoint(
-            root, payload, model=model, failure_injector=failure_injector, retention=retention
+            root,
+            payload,
+            model=model,
+            optimizer=optimizer,
+            failure_injector=failure_injector,
+            retention=retention,
         )
 
 
-def _assert_store_progress(root: Path, payload: dict[str, Any], model: torch.nn.Module) -> None:
+def _assert_store_progress(
+    root: Path, payload: dict[str, Any], model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> None:
     for generation_dir in _candidate_generation_directories(root):
         try:
             previous, _ = _load_generation_payload(
                 generation_dir,
                 model=model,
+                optimizer=optimizer,
                 expected_config_fingerprint=payload["config_fingerprint"],
                 expected_data_fingerprint=payload["data_fingerprint"],
                 expected_tokenizer_fingerprint=payload["tokenizer_fingerprint"],
@@ -736,6 +799,7 @@ def _publish_checkpoint(
     payload: dict[str, Any],
     *,
     model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     failure_injector: FailureInjector | None,
     retention: int,
 ) -> CheckpointManifestV2:
@@ -749,7 +813,7 @@ def _publish_checkpoint(
         tokenizer_fingerprint=payload["tokenizer_fingerprint"],
         run_contract_fingerprint=payload["run_contract_fingerprint"],
     )
-    _assert_store_progress(root, payload, model)
+    _assert_store_progress(root, payload, model, optimizer)
     generation = _next_generation(root)
     generation_name = f"generation-{generation:08d}"
     temporary_dir = root / f".{generation_name}.tmp-{uuid.uuid4().hex}"
@@ -805,6 +869,7 @@ def _load_legacy_checkpoint(
     path: Path,
     *,
     model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     expected_config: ExperimentConfig,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -831,6 +896,8 @@ def _load_legacy_checkpoint(
     _validate_stored_numerics(payload)
     if "model" in payload:
         _validate_model_aliases(model, payload["model"])
+    if "optimizer" in payload:
+        _validate_adam_state(optimizer, payload["optimizer"])
     return payload
 
 
@@ -861,6 +928,7 @@ def load_checkpoint(
         payload = _load_legacy_checkpoint(
             source,
             model=model,
+            optimizer=optimizer,
             expected_config=expected_config,
             expected_data_fingerprint=expected_data_fingerprint,
             expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
@@ -886,6 +954,7 @@ def load_checkpoint(
                 payload, selected_manifest = _load_generation_payload(
                     generation_dir,
                     model=model,
+                    optimizer=optimizer,
                     expected_config_fingerprint=expected_config.fingerprint(),
                     expected_data_fingerprint=expected_data_fingerprint,
                     expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
