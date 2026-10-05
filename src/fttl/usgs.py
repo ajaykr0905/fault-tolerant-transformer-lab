@@ -5,10 +5,11 @@ import json
 import math
 import os
 import sqlite3
+import stat
+import tempfile
 import time
 import urllib.error
 import urllib.request
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -426,6 +427,9 @@ class USGSCaptureLedger:
         output_dir.mkdir(parents=True, exist_ok=True)
         data_name = f"usgs-{content_sha256}.jsonl"
         data_path = output_dir / data_name
+        manifest_path = output_dir / "snapshot-manifest.json"
+        # Reject an unusable rolling alias before publishing any new data artifact.
+        _read_regular_artifact(manifest_path, max_bytes=0)
         _write_content_addressed(data_path, content)
 
         manifest_value: dict[str, Any] = {
@@ -442,7 +446,6 @@ class USGSCaptureLedger:
         }
         manifest_value["snapshot_fingerprint"] = _snapshot_fingerprint(manifest_value)
         manifest = SealedSnapshotV1(**manifest_value)
-        manifest_path = output_dir / "snapshot-manifest.json"
         encoded_manifest = (
             json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
@@ -477,25 +480,70 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _write_atomic(path: Path, content: bytes) -> None:
-    temporary = path.parent / f".{path.name}.tmp-{uuid.uuid4().hex}"
+def _read_regular_artifact(path: Path, *, max_bytes: int) -> tuple[bytes, tuple[int, int]] | None:
     try:
-        with temporary.open("xb") as handle:
+        original = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise USGSValidationError("USGS artifact must be an accessible regular file") from error
+    if not stat.S_ISREG(original.st_mode):
+        raise USGSValidationError("USGS artifact target must be a regular file")
+    identity = (original.st_dev, original.st_ino)
+    try:
+        # O_NONBLOCK prevents a raced FIFO from blocking before fstat rejects it.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != identity:
+                raise USGSValidationError("USGS regular artifact target changed while opening")
+            content = handle.read(max_bytes)
+            current = path.lstat()
+            if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != identity:
+                raise USGSValidationError("USGS regular artifact target changed while reading")
+    except OSError as error:
+        raise USGSValidationError("USGS artifact must remain an accessible regular file") from error
+    return content, identity
+
+
+def _write_atomic(path: Path, content: bytes, *, replace_regular: bool = True) -> None:
+    existing = _read_regular_artifact(path, max_bytes=len(content) + 1)
+    if existing is not None:
+        if existing[0] == content:
+            return
+        if not replace_regular:
+            raise USGSValidationError("content-addressed snapshot path has different bytes")
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.tmp-", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        if existing is None:
+            try:
+                os.link(temporary, path)
+            except FileExistsError as error:
+                winner = _read_regular_artifact(path, max_bytes=len(content) + 1)
+                if winner is None or winner[0] != content:
+                    raise USGSValidationError(
+                        "USGS artifact race winner has different bytes"
+                    ) from error
+        else:
+            current = _read_regular_artifact(path, max_bytes=0)
+            if current is None or current[1] != existing[1]:
+                raise USGSValidationError("USGS regular artifact target changed before publication")
+            os.replace(temporary, path)
         _fsync_directory(path.parent)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _write_content_addressed(path: Path, content: bytes) -> None:
-    if path.exists():
-        if path.read_bytes() != content:
-            raise USGSValidationError("content-addressed snapshot path has different bytes")
-        return
-    _write_atomic(path, content)
+    _write_atomic(path, content, replace_regular=False)
 
 
 def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
