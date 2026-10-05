@@ -20,6 +20,7 @@ test = ["pytest>=8,<9", "ruff>=0.9,<1"]
 fttl-demo = "fttl.demo:main"
 fttl-train-smoke = "fttl.cli:main"
 fttl-compare-tuning = "fttl.ablation_cli:main"
+fttl-compare-public-tuning = "fttl.public_tuning_cli:main"
 fttl-prepare-peps = "fttl.prepare_peps_cli:main"
 fttl-verify-recovery = "fttl.recovery_cli:main"
 fttl-recovery-matrix = "fttl.matrix_cli:main"
