@@ -31,6 +31,10 @@ viewer of your **actual completed run**, with raw JSON links and all equality ch
 Training runs in Python, not in the browser. Use a new output directory each time.
 After dependency installation, this demo needs no network, GPU, account or API key.
 
+Then [generate bounded byte tokens from the recovered checkpoint](docs/generation.md).
+The report binds inference to the verified model and dataset; it demonstrates a
+working training-to-inference path, not useful language quality.
+
 The prototype prepares six independently written CC0 fixture documents. It trains a
 tiny randomly initialized transformer for six steps, sampling 12 byte windows from
 two training documents—not the entire corpus. It demonstrates recovery correctness,

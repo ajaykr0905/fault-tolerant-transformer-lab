@@ -1,0 +1,29 @@
+# Generate from the recovered prototype
+
+After running `fttl-demo --output artifacts/my-demo-001`, generate from its actual
+recovered checkpoint. No download, API key or GPU is needed after installation.
+
+```bash
+uv run --frozen fttl-generate \
+  --config artifacts/my-demo-001/config.json \
+  --checkpoint artifacts/my-demo-001/run/recovered/checkpoints \
+  --dataset-manifest artifacts/my-demo-001/dataset/manifest.json \
+  --prompt 'Hello' --max-new-tokens 8 \
+  --output artifacts/my-generation-001.json
+```
+
+The checkpoint loader verifies dataset, tokenizer and configuration identity,
+integrity, FP32 state and generation before constructing a frozen CPU model.
+Training RNG and optimizer are not installed in the inference caller. Use only
+trusted local checkpoint stores: integrity hashes do not authenticate a source.
+
+Greedy decoding breaks ties by lower token ID. For seeded sampling, add
+`--method sample --temperature 0.8 --top-k 8 --seed 23`. Optional
+`--stop-token-id 256` stops after emitting EOD. Prompts are UTF-8 bytes; length caps
+are 4096 prompt bytes and 256 new tokens. Context is cropped to `block_size` with
+position IDs reset, not cached. Byte IDs remain authoritative: arbitrary output
+may not decode as UTF-8, and EOD is not a byte. Reports never overwrite earlier evidence.
+
+This demonstrates checkpoint-to-inference continuity. The six-step model is not
+a useful language assistant; this command does not establish language quality,
+GPU performance, concurrent serving safety or production readiness.

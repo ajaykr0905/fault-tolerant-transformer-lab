@@ -71,6 +71,15 @@ jobs:
           --rank 2 --max-eval-tokens 128
           --output "${RUNNER_TEMP}/fttl-ci-public-tuning/result.json"
 
+      - name: Generate bounded tokens from the recovered offline checkpoint
+        run: |
+          uv run --frozen fttl-generate \
+            --config "${RUNNER_TEMP}/fttl-ci-demo/config.json" \
+            --checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/recovered/checkpoints" \
+            --dataset-manifest "${RUNNER_TEMP}/fttl-ci-demo/dataset/manifest.json" \
+            --prompt Hello --max-new-tokens 4 \
+            --output "${RUNNER_TEMP}/fttl-ci-generation.json"
+
       - name: Verify checks did not modify tracked files
         run: |
           git diff --check
