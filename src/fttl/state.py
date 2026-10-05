@@ -56,7 +56,7 @@ def git_revision() -> str:
 
 
 def _tuple_tree(value: Any) -> Any:
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return tuple(_tuple_tree(item) for item in value)
     return value
 
@@ -77,23 +77,95 @@ def capture_rng_state() -> dict[str, Any]:
     }
 
 
+def _cpu_rng_candidates(state: Mapping[str, Any]) -> tuple[Any, Any, torch.Tensor]:
+    try:
+        required = {"python", "numpy", "torch_cpu"}
+        if (
+            not isinstance(state, Mapping)
+            or not required.issubset(state)
+            or set(state).difference(required | {"torch_cuda"})
+        ):
+            raise ValueError("state must declare the CPU fields and optional selected CUDA state")
+        python_state = _tuple_tree(state["python"])
+        if (
+            not isinstance(python_state, tuple)
+            or len(python_state) != 3
+            or type(python_state[0]) is not int
+            or python_state[0] != 3
+            or not isinstance(python_state[1], tuple)
+            or len(python_state[1]) != 625
+            or any(type(word) is not int or not 0 <= word < 2**32 for word in python_state[1][:-1])
+            or type(python_state[1][-1]) is not int
+            or not 0 <= python_state[1][-1] <= 624
+            or (
+                python_state[2] is not None
+                and (type(python_state[2]) is not float or not math.isfinite(python_state[2]))
+            )
+        ):
+            raise ValueError("Python state must contain version 3, MT19937 words, and finite cache")
+        numpy_state = state["numpy"]
+        if not isinstance(numpy_state, Mapping) or set(numpy_state) != {
+            "bit_generator",
+            "keys",
+            "position",
+            "has_gauss",
+            "cached_gaussian",
+        }:
+            raise ValueError("NumPy state fields do not match MT19937")
+        keys = numpy_state["keys"]
+        if (
+            type(numpy_state["bit_generator"]) is not str
+            or numpy_state["bit_generator"] != "MT19937"
+            or not isinstance(keys, (list, tuple))
+            or len(keys) != 624
+            or any(type(word) is not int or not 0 <= word < 2**32 for word in keys)
+            or type(numpy_state["position"]) is not int
+            or not 0 <= numpy_state["position"] <= 624
+            or type(numpy_state["has_gauss"]) is not int
+            or numpy_state["has_gauss"] not in (0, 1)
+            or type(numpy_state["cached_gaussian"]) is not float
+            or not math.isfinite(numpy_state["cached_gaussian"])
+        ):
+            raise ValueError(
+                "NumPy state must contain unsigned words, integer counters, finite cache"
+            )
+        numpy_candidate = (
+            numpy_state["bit_generator"],
+            np.asarray(keys, dtype=np.uint32),
+            numpy_state["position"],
+            numpy_state["has_gauss"],
+            numpy_state["cached_gaussian"],
+        )
+        tensor = state["torch_cpu"]
+        if (
+            type(tensor) is not torch.Tensor
+            or tensor.device.type != "cpu"
+            or tensor.layout != torch.strided
+            or tensor.dtype != torch.uint8
+            or tensor.ndim != 1
+            or not tensor.is_contiguous()
+        ):
+            raise ValueError("Torch state must be a contiguous one-dimensional CPU ByteTensor")
+        tensor = tensor.clone()
+        random.Random().setstate(python_state)
+        np.random.RandomState().set_state(numpy_candidate)
+        torch.Generator(device="cpu").set_state(tensor)
+        return python_state, numpy_candidate, tensor
+    except (KeyError, TypeError, ValueError, RuntimeError, OverflowError) as error:
+        raise ValueError(f"invalid CPU RNG state: {error}") from error
+
+
+def validate_cpu_rng_state(state: Mapping[str, Any]) -> None:
+    """Validate primitive CPU checkpoint states without changing global generators."""
+    _cpu_rng_candidates(state)
+
+
 def restore_rng_state(state: Mapping[str, Any]) -> None:
     """Validate every CPU RNG state before changing any global generator."""
-    python_state = _tuple_tree(state["python"])
-    numpy_state = state["numpy"]
-    numpy_candidate = (
-        str(numpy_state["bit_generator"]),
-        np.asarray(numpy_state["keys"], dtype=np.uint32),
-        int(numpy_state["position"]),
-        int(numpy_state["has_gauss"]),
-        float(numpy_state["cached_gaussian"]),
-    )
-    random.Random().setstate(python_state)
-    np.random.RandomState().set_state(numpy_candidate)
-    torch.Generator(device="cpu").set_state(state["torch_cpu"])
+    python_state, numpy_candidate, tensor = _cpu_rng_candidates(state)
     random.setstate(python_state)
     np.random.set_state(numpy_candidate)
-    torch.set_rng_state(state["torch_cpu"])
+    torch.set_rng_state(tensor)
 
 
 def _mapping_key_order(key: Any) -> tuple[str, Any]:
