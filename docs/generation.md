@@ -47,3 +47,19 @@ Exit status is zero only when model state, training step, training contract and
 all measured token sequences match. A valid measured mismatch is preserved in
 the report and exits with status one. This is bounded prompt coverage, not a
 claim that every input was tested.
+
+## Measure this machine, not an SLA
+
+```bash
+uv run --frozen fttl-benchmark-inference \
+  --config artifacts/my-demo-001/config.json \
+  --checkpoint artifacts/my-demo-001/run/recovered/checkpoints \
+  --dataset-manifest artifacts/my-demo-001/dataset/manifest.json \
+  --iterations 5 --warmups 1 --max-new-tokens 8 \
+  --output artifacts/my-inference-benchmark-001.json
+```
+
+The bounded CPU report retains every elapsed sample and actual emitted token
+count. It measures the complete generation call, including integrity/RNG overhead,
+but excludes checkpoint loading and warmups. Median and nearest-rank p95 are
+descriptive statistics for these few samples, not tail-latency guarantees.
