@@ -77,9 +77,13 @@ class TinyTransformer(nn.Module):
     def forward(self, tokens: torch.Tensor, targets: torch.Tensor | None = None):
         if tokens.ndim != 2:
             raise ValueError("tokens must have shape [batch, sequence]")
-        _, sequence = tokens.shape
+        batch, sequence = tokens.shape
+        if batch == 0 or sequence == 0:
+            raise ValueError("tokens must have nonempty batch and sequence dimensions")
         if sequence > self.config.block_size:
             raise ValueError("sequence exceeds configured block_size")
+        if targets is not None and targets.shape != tokens.shape:
+            raise ValueError("targets must have the same [batch, sequence] shape as tokens")
         positions = torch.arange(sequence, device=tokens.device)
         hidden = self.token_embedding(tokens) + self.position_embedding(positions)
         for block in self.blocks:
