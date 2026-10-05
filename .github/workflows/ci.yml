@@ -80,6 +80,16 @@ jobs:
             --prompt Hello --max-new-tokens 4 \
             --output "${RUNNER_TEMP}/fttl-ci-generation.json"
 
+      - name: Verify recovery preserves greedy and seeded inference tokens
+        run: >-
+          uv run --frozen fttl-verify-inference-parity
+          --config "${RUNNER_TEMP}/fttl-ci-demo/config.json"
+          --control-checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/control/checkpoints"
+          --recovered-checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/recovered/checkpoints"
+          --dataset-manifest "${RUNNER_TEMP}/fttl-ci-demo/dataset/manifest.json"
+          --prompt Hello --prompt Recovery --max-new-tokens 4
+          --output "${RUNNER_TEMP}/fttl-ci-inference-parity.json"
+
       - name: Verify checks did not modify tracked files
         run: |
           git diff --check

@@ -27,3 +27,23 @@ may not decode as UTF-8, and EOD is not a byte. Reports never overwrite earlier 
 This demonstrates checkpoint-to-inference continuity. The six-step model is not
 a useful language assistant; this command does not establish language quality,
 GPU performance, concurrent serving safety or production readiness.
+
+## Does recovery preserve generated tokens?
+
+Compare the actual demo control and recovered checkpoints using both greedy and
+private-seeded top-k sampling:
+
+```bash
+uv run --frozen fttl-verify-inference-parity \
+  --config artifacts/my-demo-001/config.json \
+  --control-checkpoint artifacts/my-demo-001/run/control/checkpoints \
+  --recovered-checkpoint artifacts/my-demo-001/run/recovered/checkpoints \
+  --dataset-manifest artifacts/my-demo-001/dataset/manifest.json \
+  --prompt Hello --prompt Recovery --max-new-tokens 8 \
+  --output artifacts/my-inference-parity-001.json
+```
+
+Exit status is zero only when model state, training step, training contract and
+all measured token sequences match. A valid measured mismatch is preserved in
+the report and exits with status one. This is bounded prompt coverage, not a
+claim that every input was tested.
