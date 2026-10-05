@@ -12,11 +12,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -27,6 +30,11 @@ from fttl.config import ExperimentConfig
 from fttl.numerical import require_finite_state
 from fttl.state import capture_rng_state, restore_rng_state
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 CHECKPOINT_SCHEMA_VERSION = 2
 DEFAULT_DATA_FINGERPRINT = "synthetic-token-stream-v1"
 DEFAULT_TOKENIZER_FINGERPRINT = "synthetic-tokenizer-v1"
@@ -34,6 +42,7 @@ DEFAULT_RUN_CONTRACT_FINGERPRINT = "training-contract-v2"
 STATE_FILENAME = "state.pt"
 MANIFEST_FILENAME = "manifest.json"
 LATEST_FILENAME = "LATEST"
+WRITER_LOCK_FILENAME = ".writer.lock"
 _GENERATION_PATTERN = re.compile(r"^generation-(\d{8})$")
 _REQUIRED_STATE_KEYS = frozenset(
     {
@@ -484,6 +493,33 @@ def _prune_generations(root: Path, retention: int) -> None:
     _fsync_directory(root)
 
 
+@contextmanager
+def _checkpoint_writer_lock(root: Path, timeout: float) -> Iterator[None]:
+    if fcntl is None:
+        raise RuntimeError("checkpoint writers require POSIX advisory flock support")
+    descriptor = os.open(root / WRITER_LOCK_FILENAME, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    acquired = False
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("checkpoint writer lock timed out") from None
+                time.sleep(min(0.01, remaining))
+        yield
+    finally:
+        try:
+            if acquired:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -502,6 +538,7 @@ def save_checkpoint(
     failure_injector: FailureInjector | None = None,
     retention: int = 2,
     rng_state: Mapping[str, Any] | None = None,
+    writer_lock_timeout: float = 30.0,
 ) -> CheckpointManifestV2:
     """Atomically publish a trusted-local checkpoint generation.
 
@@ -509,6 +546,8 @@ def save_checkpoint(
     in ``.pt`` is also treated as a directory; callers can pass the same value to
     :func:`load_checkpoint`. ``failure_injector`` receives named durability
     stages and exists solely for deterministic crash testing.
+    POSIX writers serialize through a persistent per-store advisory lock;
+    ``writer_lock_timeout`` bounds acquisition, not checkpoint serialization.
     """
 
     for label, value in (("step", step), ("tokens_seen", tokens_seen)):
@@ -516,6 +555,19 @@ def save_checkpoint(
             raise ValueError(f"checkpoint {label} must be a non-negative integer")
     if isinstance(retention, bool) or not isinstance(retention, int) or retention < 2:
         raise ValueError("checkpoint retention must keep at least two generations")
+    try:
+        valid_timeout = (
+            isinstance(writer_lock_timeout, (int, float))
+            and not isinstance(writer_lock_timeout, bool)
+            and math.isfinite(writer_lock_timeout)
+            and writer_lock_timeout > 0
+        )
+    except OverflowError:
+        valid_timeout = False
+    if not valid_timeout:
+        raise ValueError("checkpoint writer lock timeout must be finite and positive")
+    if fcntl is None:
+        raise RuntimeError("checkpoint writers require POSIX advisory flock support")
     if any(
         not isinstance(value, str) or not value
         for value in (data_fingerprint, tokenizer_fingerprint, run_contract_fingerprint)
@@ -574,14 +626,24 @@ def save_checkpoint(
             "checkpoint v2 requires a directory; move the legacy checkpoint first"
         )
     root.mkdir(parents=True, exist_ok=True)
+    with _checkpoint_writer_lock(root, writer_lock_timeout):
+        return _publish_checkpoint(
+            root, payload, failure_injector=failure_injector, retention=retention
+        )
+
+
+def _publish_checkpoint(
+    root: Path, payload: dict[str, Any], *, failure_injector: FailureInjector | None, retention: int
+) -> CheckpointManifestV2:
+    """Publish and prune while the caller holds this store's writer lock."""
     _cleanup_stale_temporaries(root)
     _cleanup_uncommitted_generations(root)
     _assert_store_contract(
         root,
-        config_fingerprint=config.fingerprint(),
-        data_fingerprint=data_fingerprint,
-        tokenizer_fingerprint=tokenizer_fingerprint,
-        run_contract_fingerprint=run_contract_fingerprint,
+        config_fingerprint=payload["config_fingerprint"],
+        data_fingerprint=payload["data_fingerprint"],
+        tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+        run_contract_fingerprint=payload["run_contract_fingerprint"],
     )
     generation = _next_generation(root)
     generation_name = f"generation-{generation:08d}"
@@ -604,14 +666,14 @@ def save_checkpoint(
         state_file=STATE_FILENAME,
         state_sha256=_sha256(state_path),
         state_bytes=state_path.stat().st_size,
-        completed_step=step,
-        tokens_seen=tokens_seen,
-        config_fingerprint=config.fingerprint(),
-        data_fingerprint=data_fingerprint,
-        tokenizer_fingerprint=tokenizer_fingerprint,
-        run_contract_fingerprint=run_contract_fingerprint,
+        completed_step=payload["step"],
+        tokens_seen=payload["tokens_seen"],
+        config_fingerprint=payload["config_fingerprint"],
+        data_fingerprint=payload["data_fingerprint"],
+        tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+        run_contract_fingerprint=payload["run_contract_fingerprint"],
         state_keys=tuple(sorted(_REQUIRED_STATE_KEYS)),
-        cursor=cursor_value,
+        cursor=payload["cursor"],
     )
     _write_durable_text(
         temporary_dir / MANIFEST_FILENAME,
