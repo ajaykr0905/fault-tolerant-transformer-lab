@@ -101,6 +101,17 @@ def _parse_finite_json_float(value: str) -> float:
     return number
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if not isinstance(key, str):
+            raise USGSValidationError("USGS JSON object field names must be strings")
+        if key in result:
+            raise USGSValidationError(f"USGS JSON contains duplicate field {key!r}")
+        result[key] = value
+    return result
+
+
 def _feed_identity(feed: str) -> tuple[str, str]:
     try:
         feed_url = USGS_FEEDS[feed]
@@ -119,6 +130,7 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
     try:
         decoded = json.loads(
             payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_json_float,
         )
@@ -384,6 +396,7 @@ class USGSCaptureLedger:
             try:
                 feature = json.loads(
                     payload_json,
+                    object_pairs_hook=_unique_json_object,
                     parse_constant=_reject_json_constant,
                     parse_float=_parse_finite_json_float,
                 )
@@ -502,6 +515,7 @@ def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
     try:
         raw = json.loads(
             manifest_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_json_float,
         )
@@ -564,6 +578,7 @@ def load_snapshot(
         for line in lines:
             record = json.loads(
                 line,
+                object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_json_constant,
                 parse_float=_parse_finite_json_float,
             )
@@ -592,6 +607,7 @@ def load_snapshot(
             identities.add(identity)
             feature = json.loads(
                 record["text"],
+                object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_json_constant,
                 parse_float=_parse_finite_json_float,
             )
