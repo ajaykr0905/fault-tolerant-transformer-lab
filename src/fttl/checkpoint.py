@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import math
 import os
@@ -442,8 +443,16 @@ def _load_generation_payload(
         expected_run_contract_fingerprint=expected_run_contract_fingerprint,
     )
     try:
+        state_snapshot = (generation_dir / manifest.state_file).read_bytes()
+    except OSError as error:
+        raise CheckpointIntegrityError("checkpoint state snapshot is unreadable") from error
+    if len(state_snapshot) != manifest.state_bytes:
+        raise CheckpointIntegrityError("checkpoint state snapshot byte length does not match manifest")
+    if hashlib.sha256(state_snapshot).hexdigest() != manifest.state_sha256:
+        raise CheckpointIntegrityError("checkpoint state snapshot SHA-256 does not match manifest")
+    try:
         payload = torch.load(
-            generation_dir / manifest.state_file,
+            io.BytesIO(state_snapshot),
             map_location="cpu",
             weights_only=True,
         )
