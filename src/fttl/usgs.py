@@ -166,16 +166,20 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
         if not isinstance(geometry, dict) or geometry.get("type") != "Point":
             raise USGSValidationError(f"feature {event_id} must have Point geometry")
         coordinates = geometry.get("coordinates")
-        if (
-            not isinstance(coordinates, list)
-            or len(coordinates) < 2
-            or any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                for value in coordinates
+        try:
+            invalid_coordinates = (
+                not isinstance(coordinates, list)
+                or len(coordinates) < 2
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    for value in coordinates
+                )
             )
-        ):
+        except OverflowError as error:
+            raise USGSValidationError(f"feature {event_id} has invalid coordinates") from error
+        if invalid_coordinates:
             raise USGSValidationError(f"feature {event_id} has invalid coordinates")
         identity = (event_id, updated)
         if identity in seen:
