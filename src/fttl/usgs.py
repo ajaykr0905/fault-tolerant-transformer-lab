@@ -33,6 +33,7 @@ USGS_FEEDS = {
 }
 DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
+MAX_RESPONSE_BYTES = MAX_SNAPSHOT_BYTES
 SQLITE_MAX_INTEGER = 2**63 - 1
 
 
@@ -206,6 +207,11 @@ def fetch_feed(
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     retries: int = 3,
 ) -> bytes:
+    """Fetch an allowlisted feed with an exact integer byte budget in [1, 64 MiB].
+
+    Read at most one sentinel byte beyond the budget to detect an oversized response.
+    Invalid budgets fail before the opener or retry backoff is invoked.
+    """
     if feed_url not in USGS_FEEDS.values():
         raise ValueError("feed_url must be one of the allowlisted USGS feeds")
     if isinstance(retries, bool) or not isinstance(retries, int) or not 1 <= retries <= 5:
@@ -217,12 +223,8 @@ def fetch_feed(
         or not math.isfinite(timeout_seconds)
     ):
         raise ValueError("timeout_seconds must be a finite number in (0, 60]")
-    if (
-        isinstance(max_response_bytes, bool)
-        or not isinstance(max_response_bytes, int)
-        or max_response_bytes < 1
-    ):
-        raise ValueError("max_response_bytes must be a positive integer")
+    if type(max_response_bytes) is not int or not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+        raise ValueError("max_response_bytes must be an integer between 1 and 67108864 (64 MiB)")
 
     request = urllib.request.Request(
         feed_url,
