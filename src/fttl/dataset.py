@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -212,6 +213,38 @@ class DatasetManifestV1:
         return manifest
 
 
+@dataclass(frozen=True, init=False)
+class PreparedDatasetSnapshot:
+    """Verified captured bytes, independent of subsequent filesystem changes.
+
+    Documents are frozen records; each metadata access returns an isolated copy.
+    Hashes bind content and provenance, not authenticity or filesystem security.
+    """
+
+    _manifest_json: str
+    documents: tuple[PreparedDocument, ...]
+
+    def __init__(self, manifest_bytes: bytes, document_bytes: bytes) -> None:
+        if type(manifest_bytes) is not bytes or type(document_bytes) is not bytes:
+            raise DatasetValidationError("snapshot inputs must be immutable bytes")
+        manifest = _manifest_from_bytes(manifest_bytes)
+        documents = _verified_document_bytes(manifest, document_bytes)
+        object.__setattr__(
+            self, "_manifest_json", _canonical_json_bytes(manifest.to_dict()).decode()
+        )
+        object.__setattr__(self, "documents", documents)
+
+    @property
+    def manifest(self) -> DatasetManifestV1:
+        return DatasetManifestV1.from_dict(json.loads(self._manifest_json))
+
+    def documents_for(self, split: str | None = "train") -> tuple[PreparedDocument, ...]:
+        if split is None:
+            return self.documents
+        requested_split = _normalize_split(split)
+        return tuple(document for document in self.documents if document.split == requested_split)
+
+
 DownloadFunction = Callable[[str, Path], None]
 
 
@@ -302,32 +335,56 @@ def prepare_document_records(
     )
 
 
-def load_dataset_manifest(path: Path) -> DatasetManifestV1:
+def load_dataset_snapshot(path: Path) -> PreparedDatasetSnapshot:
+    """Capture manifest and documents once, verifying the exact bytes parsed.
+
+    Resolve the input directory before opening its files. A concurrent replacement
+    yields either a consistent captured dataset or an explicit integrity failure.
+    """
     manifest_path = Path(path)
     if manifest_path.is_dir():
         manifest_path = manifest_path / "manifest.json"
+    manifest_path = manifest_path.resolve()
     try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise DatasetValidationError(f"cannot read dataset manifest {manifest_path}: {error}") from error
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError as error:
+        raise DatasetValidationError(
+            f"cannot read dataset manifest {manifest_path}: {error}"
+        ) from error
+    manifest = _manifest_from_bytes(manifest_bytes)
+    relative_path = manifest.documents.get("path")
+    if not isinstance(relative_path, str) or not relative_path or Path(relative_path).is_absolute():
+        raise DatasetValidationError("prepared documents path must be relative")
+    documents_path = (manifest_path.parent / relative_path).resolve()
+    if documents_path.parent != manifest_path.parent:
+        raise DatasetValidationError(
+            "prepared documents path must stay inside the dataset directory"
+        )
+    try:
+        document_bytes = documents_path.read_bytes()
+    except OSError as error:
+        raise DatasetValidationError(f"prepared documents file is unavailable: {error}") from error
+    return PreparedDatasetSnapshot(manifest_bytes, document_bytes)
+
+
+def _manifest_from_bytes(content: bytes) -> DatasetManifestV1:
+    try:
+        payload = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DatasetValidationError(f"cannot read dataset manifest: {error}") from error
     if not isinstance(payload, dict):
         raise DatasetValidationError("dataset manifest root must be a JSON object")
-    manifest = DatasetManifestV1.from_dict(payload)
-    _verify_prepared_documents(manifest_path.parent, manifest)
-    return manifest
+    return DatasetManifestV1.from_dict(payload)
 
 
-def load_prepared_documents(path: Path, *, split: str | None = "train") -> tuple[PreparedDocument, ...]:
-    manifest_path = Path(path)
-    if manifest_path.is_dir():
-        manifest_path = manifest_path / "manifest.json"
-    manifest = load_dataset_manifest(manifest_path)
-    requested_split = _normalize_split(split) if split is not None else None
-    documents_path = manifest_path.parent / str(manifest.documents["path"])
-    documents = tuple(_iter_prepared_documents(documents_path))
-    if requested_split is None:
-        return documents
-    return tuple(document for document in documents if document.split == requested_split)
+def load_dataset_manifest(path: Path) -> DatasetManifestV1:
+    return load_dataset_snapshot(path).manifest
+
+
+def load_prepared_documents(
+    path: Path, *, split: str | None = "train"
+) -> tuple[PreparedDocument, ...]:
+    return load_dataset_snapshot(path).documents_for(split)
 
 
 def stable_document_id(source_repository: str, source_id: str) -> str:
@@ -620,21 +677,13 @@ def _validate_manifest_contract(manifest: DatasetManifestV1) -> None:
             raise DatasetValidationError(f"manifest count {field!r} must be a non-negative integer")
 
 
-def _verify_prepared_documents(base_dir: Path, manifest: DatasetManifestV1) -> None:
-    relative_path = manifest.documents.get("path")
-    if not isinstance(relative_path, str) or not relative_path or Path(relative_path).is_absolute():
-        raise DatasetValidationError("prepared documents path must be relative")
-    base_dir = base_dir.resolve()
-    documents_path = (base_dir / relative_path).resolve()
-    if documents_path.parent != base_dir:
-        raise DatasetValidationError("prepared documents path must stay inside the dataset directory")
+def _verified_document_bytes(
+    manifest: DatasetManifestV1, content: bytes
+) -> tuple[PreparedDocument, ...]:
     expected_length = manifest.documents.get("byte_length")
     if not isinstance(expected_length, int) or expected_length < 0:
         raise DatasetValidationError("prepared documents byte length must be non-negative")
-    try:
-        actual_length = documents_path.stat().st_size
-    except OSError as error:
-        raise DatasetValidationError(f"prepared documents file is unavailable: {error}") from error
+    actual_length = len(content)
     if actual_length != expected_length:
         raise DatasetValidationError(
             f"prepared documents byte length mismatch: expected {expected_length}, got {actual_length}"
@@ -642,9 +691,11 @@ def _verify_prepared_documents(base_dir: Path, manifest: DatasetManifestV1) -> N
     expected_hash = manifest.documents.get("sha256")
     if not isinstance(expected_hash, str):
         raise DatasetValidationError("prepared documents SHA-256 is missing")
-    _verify_file(documents_path, expected_hash, "prepared documents")
+    _require_sha256(expected_hash, "prepared documents SHA-256")
+    if hashlib.sha256(content).hexdigest() != expected_hash:
+        raise DatasetValidationError("prepared documents SHA-256 mismatch")
 
-    documents = tuple(_iter_prepared_documents(documents_path))
+    documents = tuple(_iter_prepared_documents(content))
     for document in documents:
         expected_id = stable_document_id(str(manifest.source["repository"]), document.source_id)
         if document.document_id != expected_id:
@@ -662,41 +713,54 @@ def _verify_prepared_documents(base_dir: Path, manifest: DatasetManifestV1) -> N
     }
     if actual_by_split != expected_by_split:
         raise DatasetValidationError("prepared document assignments do not match manifest splits")
-    if [document.document_id for document in documents] != sorted(document.document_id for document in documents):
+    if [document.document_id for document in documents] != sorted(
+        document.document_id for document in documents
+    ):
         raise DatasetValidationError("prepared documents are not in canonical order")
     utf8_bytes = sum(len(document.text.encode("utf-8")) for document in documents)
     if utf8_bytes != manifest.counts.get("utf8_bytes"):
         raise DatasetValidationError("prepared UTF-8 byte count does not match manifest")
     if utf8_bytes + len(documents) != manifest.counts.get("tokens_including_eod"):
         raise DatasetValidationError("prepared token count does not match manifest")
+    return documents
 
 
-def _iter_prepared_documents(path: Path) -> Iterator[PreparedDocument]:
+def _iter_prepared_documents(content: bytes) -> Iterator[PreparedDocument]:
     try:
-        with path.open(encoding="utf-8") as stream:
-            for line_number, line in enumerate(stream, start=1):
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError as error:
-                    raise DatasetValidationError(f"prepared document {line_number} is invalid JSON") from error
-                if not isinstance(row, dict):
-                    raise DatasetValidationError(f"prepared document {line_number} must be an object")
-                required = ("document_id", "source_id", "split", "text", "text_sha256")
-                if any(not isinstance(row.get(field), str) for field in required):
-                    raise DatasetValidationError(f"prepared document {line_number} has invalid fields")
-                document = PreparedDocument(**{field: row[field] for field in required})
-                if not document.source_id:
-                    raise DatasetValidationError(f"prepared document {line_number} has an empty source id")
-                _require_sha256(document.document_id, f"prepared document {line_number} id")
-                _require_sha256(document.text_sha256, f"prepared document {line_number} text SHA-256")
-                if document.text_sha256 != hashlib.sha256(document.text.encode("utf-8")).hexdigest():
-                    raise DatasetValidationError(f"prepared document {line_number} text digest mismatch")
-                if _normalize_text(document.text) != document.text:
-                    raise DatasetValidationError(f"prepared document {line_number} text is not canonical")
-                if document.split != split_for_document(document.document_id):
-                    raise DatasetValidationError(f"prepared document {line_number} split assignment drifted")
-                yield document
-    except (OSError, UnicodeDecodeError) as error:
+        lines = io.StringIO(content.decode("utf-8"))
+        for line_number, line in enumerate(lines, start=1):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise DatasetValidationError(
+                    f"prepared document {line_number} is invalid JSON"
+                ) from error
+            if not isinstance(row, dict):
+                raise DatasetValidationError(f"prepared document {line_number} must be an object")
+            required = ("document_id", "source_id", "split", "text", "text_sha256")
+            if any(not isinstance(row.get(field), str) for field in required):
+                raise DatasetValidationError(f"prepared document {line_number} has invalid fields")
+            document = PreparedDocument(**{field: row[field] for field in required})
+            if not document.source_id:
+                raise DatasetValidationError(
+                    f"prepared document {line_number} has an empty source id"
+                )
+            _require_sha256(document.document_id, f"prepared document {line_number} id")
+            _require_sha256(document.text_sha256, f"prepared document {line_number} text SHA-256")
+            if document.text_sha256 != hashlib.sha256(document.text.encode("utf-8")).hexdigest():
+                raise DatasetValidationError(
+                    f"prepared document {line_number} text digest mismatch"
+                )
+            if _normalize_text(document.text) != document.text:
+                raise DatasetValidationError(
+                    f"prepared document {line_number} text is not canonical"
+                )
+            if document.split != split_for_document(document.document_id):
+                raise DatasetValidationError(
+                    f"prepared document {line_number} split assignment drifted"
+                )
+            yield document
+    except UnicodeDecodeError as error:
         raise DatasetValidationError(f"cannot read prepared documents: {error}") from error
 
 

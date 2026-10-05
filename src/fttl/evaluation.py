@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from fttl.dataset import load_dataset_manifest, load_prepared_documents
+from fttl.dataset import PreparedDatasetSnapshot, load_dataset_snapshot
 from fttl.model import TinyTransformer
 from fttl.state import state_digest
 
@@ -37,7 +37,7 @@ class EvaluationResultV1:
 
 def evaluate_held_out(
     model: TinyTransformer,
-    manifest_path: Path,
+    manifest_path: Path | PreparedDatasetSnapshot,
     *,
     split: str = "validation",
     max_tokens: int = 4096,
@@ -56,8 +56,13 @@ def evaluate_held_out(
         raise ValueError("byte evaluation requires model vocab_size=257")
     if any(parameter.device.type != "cpu" for parameter in model.parameters()):
         raise ValueError("this evaluator supports CPU models only")
-    manifest = load_dataset_manifest(manifest_path)
-    documents = load_prepared_documents(manifest_path, split=split)
+    snapshot = (
+        manifest_path
+        if isinstance(manifest_path, PreparedDatasetSnapshot)
+        else load_dataset_snapshot(manifest_path)
+    )
+    manifest = snapshot.manifest
+    documents = snapshot.documents_for(split)
     available_tokens = sum(len(document.text.encode("utf-8")) for document in documents)
     if not available_tokens:
         raise ValueError("selected held-out split has no target tokens")

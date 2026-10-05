@@ -157,6 +157,26 @@ For checkpoint-bound validation or test loss, use
 [the held-out evaluation command](docs/evaluation.md). It includes short final windows,
 counts each next-byte target once and reports the exact evaluated subset.
 
+## Compare full tuning with LoRA on public bytes
+
+Start from the same random tiny Transformer, replay identical training windows and CPU dropout
+states, and measure each arm on validation documents before and after training:
+
+```bash
+uv run --frozen fttl-compare-public-tuning \
+  --config configs/peps-cpu.json \
+  --dataset-manifest .cache/fttl/peps-v1/manifest.json \
+  --rank 4 --max-eval-tokens 4096 \
+  --output artifacts/public-tuning-001/result.json
+```
+
+Prepare the pinned PEP manifest above first. For a network-free prototype instead, use the
+`config.json` and `dataset/manifest.json` created by `fttl-demo` with `--rank 2`. The report records
+paired samples, token counts, validation NLL, adapter-only parameter counts and unchanged frozen
+base weights. It is a bounded CPU mechanics experiment, not pretrained-model fine-tuning or a
+claim that LoRA improves language quality. See [the comparison runbook](docs/public-tuning.md),
+including portable adapter state and standalone inference conversion.
+
 ## Experimental NVIDIA GPU run
 
 For the first experimental single-NVIDIA-GPU checkpoint reconstruction, see the
@@ -190,8 +210,8 @@ It is not a pretrained Llama, Qwen or GPT model, and no paper's benchmark is rep
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762) supplies the conceptual Transformer
   foundation. This decoder-only model is not a reproduction of the paper's encoder–decoder model.
 - [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685) is the
-  adapter reference. Current adapters are tested on a synthetic workload, not a fine-tuned
-  pretrained model or evidence of improved language quality.
+  adapter reference. Current adapters are tested on synthetic and bounded public-byte CPU workloads,
+  not a fine-tuned pretrained model or evidence of improved language quality.
 - [PyTorch's fault-tolerant Llama experiment](https://pytorch.org/blog/fault-tolerant-llama-training-with-2000-synthetic-failures-every-15-seconds-and-no-checkpoints-on-crusoe-l40s/)
   and [TorchFT](https://docs.pytorch.org/torchft/) motivate the reliability direction. Their
   distributed peer-recovery design and scale results are not implemented or claimed by this lab.
@@ -260,8 +280,8 @@ deterministic Python exceptions. The additional process verifier sends real `SIG
 worker at a selected boundary; the OS and filesystem remain running. Arbitrary asynchronous kills,
 filesystem faults, and physical power loss are not covered.
 
-The existing LoRA experiment compares adapter mechanics under a controlled synthetic workload. It
-is not evidence that a pretrained model improved.
+The LoRA experiments compare adapter mechanics under controlled synthetic and public-byte CPU
+workloads. They are not evidence that a pretrained model improved.
 
 Full resume checkpoints are trusted local artifacts. `torch.load(..., weights_only=True)` and
 SHA-256 validation reduce risk, but a digest is not authentication if an attacker can replace both

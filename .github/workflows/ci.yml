@@ -63,6 +63,14 @@ jobs:
       - name: Run the working prototype and export its offline viewer
         run: uv run --frozen fttl-demo --output "${RUNNER_TEMP}/fttl-ci-demo"
 
+      - name: Compare full and LoRA tuning on the offline prototype dataset
+        run: >-
+          uv run --frozen fttl-compare-public-tuning
+          --config "${RUNNER_TEMP}/fttl-ci-demo/config.json"
+          --dataset-manifest "${RUNNER_TEMP}/fttl-ci-demo/dataset/manifest.json"
+          --rank 2 --max-eval-tokens 128
+          --output "${RUNNER_TEMP}/fttl-ci-public-tuning/result.json"
+
       - name: Verify checks did not modify tracked files
         run: |
           git diff --check
