@@ -12,6 +12,7 @@ from fttl.config import ExperimentConfig
 from fttl.dataset import load_dataset_manifest
 from fttl.evaluation import evaluate_held_out
 from fttl.model import TinyTransformer
+from fttl.reports import publish_json
 from fttl.state import code_fingerprint, git_revision
 
 
@@ -25,7 +26,7 @@ def evaluate_checkpoint(
     max_tokens: int = 4096,
 ) -> dict[str, object]:
     """Write one fresh report from a verified, dataset-bound local checkpoint."""
-    if output.exists():
+    if output.exists() or output.is_symlink():
         raise ValueError("evaluation requires a fresh output file")
     manifest = load_dataset_manifest(dataset_manifest)
     with torch.random.fork_rng(devices=[]):
@@ -62,10 +63,7 @@ def evaluate_checkpoint(
             "A smoke result does not establish pretrained-model quality or GPU performance.",
         ],
     }
-    encoded = json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("x", encoding="utf-8") as handle:
-        handle.write(encoded)
+    publish_json(output, result)
     return result
 
 

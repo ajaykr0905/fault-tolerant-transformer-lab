@@ -15,6 +15,7 @@ from fttl.data import batch_for_step, synthetic_token_stream
 from fttl.lora import inject_lora
 from fttl.model import TinyTransformer
 from fttl.numerical import require_finite_state
+from fttl.reports import publish_json
 from fttl.state import capture_rng_state, code_fingerprint, restore_rng_state
 from fttl.train import seed_everything
 
@@ -87,6 +88,8 @@ def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> Tunin
 
 
 def compare_tuning(config: ExperimentConfig, output: Path, *, rank: int = 4) -> TuningComparison:
+    if output.exists() or output.is_symlink():
+        raise ValueError("tuning comparison requires a fresh output file")
     seed_everything(config.seed)
     baseline = TinyTransformer(config.model)
     base_state = copy.deepcopy(baseline.state_dict())
@@ -144,6 +147,5 @@ def compare_tuning(config: ExperimentConfig, output: Path, *, rank: int = 4) -> 
             "The comparison does not claim GPU, multi-GPU, memory, or production serving results.",
         ),
     )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(asdict(comparison), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    publish_json(output, asdict(comparison))
     return comparison
