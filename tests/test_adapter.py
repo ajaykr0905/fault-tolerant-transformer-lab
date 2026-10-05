@@ -292,6 +292,38 @@ def test_base_digest_binds_buffers_even_when_nonpersistent():
     load_adapter(target, payload)
 
 
+@pytest.mark.parametrize("kind", ["parameter", "buffer"])
+@pytest.mark.parametrize("layout", ["sparse", "meta"])
+def test_nondense_base_state_is_rejected_before_storage_access(tmp_path, kind, layout):
+    model = _model()
+    payload = export_adapter(model)
+    tensor = torch.eye(2).to_sparse() if layout == "sparse" else torch.empty(2, 2, device="meta")
+    if kind == "parameter":
+        tensor = torch.nn.Parameter(tensor, requires_grad=False)
+        model.register_parameter("unsupported", tensor)
+    else:
+        model.register_buffer("unsupported", tensor, persistent=False)
+    flags = {name: parameter.requires_grad for name, parameter in model.named_parameters()}
+    rng = torch.get_rng_state().clone()
+    output = tmp_path / "new" / "adapter.pt"
+    for operation in (
+        lambda: export_adapter(model),
+        lambda: load_adapter(model, payload),
+        lambda: save_adapter(model, output),
+    ):
+        with pytest.raises(ValueError, match="materialized dense tensor"):
+            operation()
+        assert model.unsupported is tensor
+        assert flags == {
+            name: parameter.requires_grad for name, parameter in model.named_parameters()
+        }
+        assert model.training
+        assert torch.equal(torch.get_rng_state(), rng)
+        assert not output.parent.exists()
+        if layout == "sparse":
+            torch.testing.assert_close(tensor.to_dense(), torch.eye(2), rtol=0, atol=0)
+
+
 def test_tied_embedding_base_is_stably_bound_across_fresh_models():
     source = _model(targets=("lm_head",))
     tokens = _train(source)

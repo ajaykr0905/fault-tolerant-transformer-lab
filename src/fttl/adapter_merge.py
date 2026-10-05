@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections import Counter
+from itertools import chain
 
 import torch
 
@@ -28,7 +29,12 @@ def merge_lora_for_inference(model: TinyTransformer) -> TinyTransformer:
     ]
     if not adapters:
         raise ValueError("adapter merge requires at least one LoRA module")
-    require_finite_state(model.state_dict(), "source model state")
+    for name, tensor in chain(
+        model.named_parameters(remove_duplicate=False), model.named_buffers(remove_duplicate=False)
+    ):
+        if tensor.layout != torch.strided or tensor.device.type == "meta":
+            raise ValueError(f"source model state.{name} must be a materialized dense tensor")
+        require_finite_state(tensor, f"source model state.{name}")
     references = Counter(
         id(parameter) for _, parameter in model.named_parameters(remove_duplicate=False)
     )

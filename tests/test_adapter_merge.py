@@ -84,6 +84,71 @@ def test_finite_adapters_whose_product_overflows_are_rejected():
     assert state_digest(source.state_dict()) == before
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_merge_rejects_nonfinite_nonpersistent_buffers_without_mutation(value):
+    source = adapted_model().train()
+    source.register_buffer("hidden_control", torch.tensor([value]), persistent=False)
+    before = state_digest(source.state_dict())
+    flags = [parameter.requires_grad for parameter in source.parameters()]
+    modes = [module.training for module in source.modules()]
+    rng = state_digest(capture_rng_state())
+    with pytest.raises(FloatingPointError, match="source model state.hidden_control.*non-finite"):
+        merge_lora_for_inference(source)
+    assert state_digest(source.state_dict()) == before
+    assert [parameter.requires_grad for parameter in source.parameters()] == flags
+    assert [module.training for module in source.modules()] == modes
+    assert state_digest(capture_rng_state()) == rng
+    torch.testing.assert_close(source.hidden_control, torch.tensor([value]), equal_nan=True)
+
+
+def test_finite_nonpersistent_buffer_survives_as_an_independent_clone():
+    source = adapted_model()
+    source.register_buffer("hidden_control", torch.tensor([1.0, 2.0]), persistent=False)
+    merged = merge_lora_for_inference(source)
+    torch.testing.assert_close(merged.hidden_control, source.hidden_control, rtol=0, atol=0)
+    assert "hidden_control" not in merged.state_dict()
+    assert merged.lm_head.weight is merged.token_embedding.weight
+    merged.hidden_control.add_(10)
+    torch.testing.assert_close(source.hidden_control, torch.tensor([1.0, 2.0]), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("kind", ["parameter", "buffer", "adapter"])
+@pytest.mark.parametrize("layout", ["sparse", "meta"])
+def test_merge_rejects_nondense_source_state_cleanly_without_mutation(kind, layout):
+    source = adapted_model().train()
+    if kind == "adapter":
+        original = source.blocks[0].attention.qkv.lora_a
+        tensor = (
+            original.detach().to_sparse()
+            if layout == "sparse"
+            else torch.empty_like(original, device="meta")
+        )
+        tensor = torch.nn.Parameter(tensor)
+        source.blocks[0].attention.qkv.lora_a = tensor
+    else:
+        tensor = (
+            torch.eye(2).to_sparse() if layout == "sparse" else torch.empty(2, 2, device="meta")
+        )
+        if kind == "parameter":
+            tensor = torch.nn.Parameter(tensor, requires_grad=False)
+            source.register_parameter("unsupported", tensor)
+        else:
+            source.register_buffer("unsupported", tensor, persistent=False)
+    flags = [parameter.requires_grad for parameter in source.parameters()]
+    modes = [module.training for module in source.modules()]
+    rng = state_digest(capture_rng_state())
+    original_dense = tensor.to_dense().detach().clone() if layout == "sparse" else None
+    with pytest.raises(ValueError, match="materialized dense tensor"):
+        merge_lora_for_inference(source)
+    actual = source.blocks[0].attention.qkv.lora_a if kind == "adapter" else source.unsupported
+    assert actual is tensor
+    assert [parameter.requires_grad for parameter in source.parameters()] == flags
+    assert [module.training for module in source.modules()] == modes
+    assert state_digest(capture_rng_state()) == rng
+    if original_dense is not None:
+        torch.testing.assert_close(tensor.to_dense(), original_dense, rtol=0, atol=0)
+
+
 def test_merge_rejects_adapter_on_tied_language_head():
     source = TinyTransformer(
         ModelConfig(vocab_size=16, block_size=4, d_model=8, n_heads=2, n_layers=1)

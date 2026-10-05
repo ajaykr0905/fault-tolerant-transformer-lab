@@ -108,17 +108,19 @@ def _inspect_model(model: TinyTransformer) -> tuple[dict[str, LoRALinear], str]:
         if name not in adapter_names:
             if parameter.requires_grad:
                 raise ValueError(f"base parameter {name} must be frozen")
+            snapshot = _tensor_snapshot(parameter, name)
             storage = (parameter.device, parameter.untyped_storage().data_ptr())
             if storage in adapter_storages:
                 raise ValueError("base parameters must not share adapter storage")
-            base_state[f"parameter:{name}"] = _tensor_snapshot(parameter, name)
+            base_state[f"parameter:{name}"] = snapshot
     for name, buffer in model.named_buffers(remove_duplicate=False):
         if buffer.requires_grad:
             raise ValueError(f"base buffer {name} must be frozen")
+        snapshot = _tensor_snapshot(buffer, name)
         storage = (buffer.device, buffer.untyped_storage().data_ptr())
         if storage in adapter_storages:
             raise ValueError("base buffers must not share adapter storage")
-        base_state[f"buffer:{name}"] = _tensor_snapshot(buffer, name)
+        base_state[f"buffer:{name}"] = snapshot
     return modules, state_digest(base_state)
 
 
