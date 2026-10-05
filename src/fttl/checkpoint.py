@@ -460,6 +460,7 @@ def _assert_fingerprints(
 def _load_generation_payload(
     generation_dir: Path,
     *,
+    model: torch.nn.Module,
     expected_config_fingerprint: str,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -517,7 +518,35 @@ def _load_generation_payload(
     if payload.get("cursor") != manifest.cursor:
         raise CheckpointIntegrityError("checkpoint state and manifest cursors differ")
     _validate_stored_numerics(payload)
+    _validate_model_aliases(model, payload["model"])
     return payload, manifest
+
+
+def _validate_model_aliases(model: torch.nn.Module, state: Mapping[str, Any]) -> None:
+    """Reject contradictory values for declared shared parameter/buffer objects."""
+    aliases: dict[int, list[str]] = {}
+    for name, tensor in (
+        *model.named_parameters(remove_duplicate=False),
+        *model.named_buffers(remove_duplicate=False),
+    ):
+        if name in state:
+            aliases.setdefault(id(tensor), []).append(name)
+    for names in aliases.values():
+        if len(names) < 2:
+            continue
+        first = state[names[0]]
+        for name in names[1:]:
+            other = state[name]
+            if (
+                not isinstance(first, torch.Tensor)
+                or not isinstance(other, torch.Tensor)
+                or first.shape != other.shape
+                or first.dtype != other.dtype
+                or not torch.equal(first, other)
+            ):
+                raise CheckpointIntegrityError(
+                    f"checkpoint model aliases contain conflicting values: {', '.join(names)}"
+                )
 
 
 def _prune_generations(root: Path, retention: int) -> None:
@@ -665,6 +694,10 @@ def save_checkpoint(
     _validate_checkpoint_numerics(
         {"payload": payload, "runtime_buffers": dict(model.named_buffers(remove_duplicate=False))}
     )
+    try:
+        _validate_model_aliases(model, payload["model"])
+    except CheckpointIntegrityError as error:
+        raise ValueError(str(error)) from error
 
     root = Path(path)
     if root.exists() and not root.is_dir():
@@ -745,6 +778,7 @@ def _publish_checkpoint(
 def _load_legacy_checkpoint(
     path: Path,
     *,
+    model: torch.nn.Module,
     expected_config: ExperimentConfig,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -769,6 +803,8 @@ def _load_legacy_checkpoint(
             "checkpoint configuration does not match experiment"
         )
     _validate_stored_numerics(payload)
+    if "model" in payload:
+        _validate_model_aliases(model, payload["model"])
     return payload
 
 
@@ -798,6 +834,7 @@ def load_checkpoint(
     if source.is_file():
         payload = _load_legacy_checkpoint(
             source,
+            model=model,
             expected_config=expected_config,
             expected_data_fingerprint=expected_data_fingerprint,
             expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
@@ -822,6 +859,7 @@ def load_checkpoint(
             try:
                 payload, selected_manifest = _load_generation_payload(
                     generation_dir,
+                    model=model,
                     expected_config_fingerprint=expected_config.fingerprint(),
                     expected_data_fingerprint=expected_data_fingerprint,
                     expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
