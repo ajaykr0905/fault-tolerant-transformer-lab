@@ -5,6 +5,15 @@ Checkpoint stores support cooperating writers on local POSIX filesystems
 through temporary cleanup, contract checks, generation allocation, publication,
 and retention pruning. Different stores have independent locks.
 
+After contract checks, writers compare their staged progress against the newest
+fully integrity-valid committed state while holding the lock. Neither completed
+step nor tokens seen may decrease; a stale save raises `CheckpointMismatchError`
+before allocating or writing a generation. Equal-progress repeat saves are
+allowed. A corrupt newest state falls back to a valid predecessor for this
+comparison, so forward repair remains possible. This check decodes the prior
+trusted-local state and adds its transient memory/validation cost to saving.
+It does not constrain history lengths or assume a fixed number of tokens per step.
+
 The default acquisition timeout is 30 seconds. Set
 `writer_lock_timeout=5.0` to wait at most five seconds for another writer.
 `TimeoutError` means no checkpoint cleanup or publication was performed by that

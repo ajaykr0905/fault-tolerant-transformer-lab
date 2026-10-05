@@ -707,12 +707,37 @@ def save_checkpoint(
     root.mkdir(parents=True, exist_ok=True)
     with _checkpoint_writer_lock(root, writer_lock_timeout):
         return _publish_checkpoint(
-            root, payload, failure_injector=failure_injector, retention=retention
+            root, payload, model=model, failure_injector=failure_injector, retention=retention
         )
 
 
+def _assert_store_progress(root: Path, payload: dict[str, Any], model: torch.nn.Module) -> None:
+    for generation_dir in _candidate_generation_directories(root):
+        try:
+            previous, _ = _load_generation_payload(
+                generation_dir,
+                model=model,
+                expected_config_fingerprint=payload["config_fingerprint"],
+                expected_data_fingerprint=payload["data_fingerprint"],
+                expected_tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+                expected_run_contract_fingerprint=payload["run_contract_fingerprint"],
+            )
+        except CheckpointIntegrityError:
+            continue
+        if payload["step"] < previous["step"] or payload["tokens_seen"] < previous["tokens_seen"]:
+            raise CheckpointMismatchError(
+                "checkpoint progress must not decrease completed step or tokens seen"
+            )
+        return
+
+
 def _publish_checkpoint(
-    root: Path, payload: dict[str, Any], *, failure_injector: FailureInjector | None, retention: int
+    root: Path,
+    payload: dict[str, Any],
+    *,
+    model: torch.nn.Module,
+    failure_injector: FailureInjector | None,
+    retention: int,
 ) -> CheckpointManifestV2:
     """Publish and prune while the caller holds this store's writer lock."""
     _cleanup_stale_temporaries(root)
@@ -724,6 +749,7 @@ def _publish_checkpoint(
         tokenizer_fingerprint=payload["tokenizer_fingerprint"],
         run_contract_fingerprint=payload["run_contract_fingerprint"],
     )
+    _assert_store_progress(root, payload, model)
     generation = _next_generation(root)
     generation_name = f"generation-{generation:08d}"
     temporary_dir = root / f".{generation_name}.tmp-{uuid.uuid4().hex}"
