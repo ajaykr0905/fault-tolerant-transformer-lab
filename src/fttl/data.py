@@ -12,6 +12,11 @@ from fttl.config import ExperimentConfig
 from fttl.dataset import PreparedDatasetSnapshot, load_dataset_snapshot
 
 
+def _require_nonnegative_integer(value: int, field: str) -> None:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"cursor {field} must be a non-negative integer")
+
+
 @dataclass(frozen=True)
 class TrainingCursorV1:
     """The next uncommitted batch in a deterministic training stream."""
@@ -25,12 +30,18 @@ class TrainingCursorV1:
     batch_index: int
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version != 1:
             raise ValueError("TrainingCursorV1 requires schema_version=1")
-        if self.epoch < 0 or self.token_window_offset < 0 or self.batch_index < 0:
-            raise ValueError("cursor counters must be non-negative")
-        if not self.document_id or not self.batch_id or not self.next_sample_ids:
-            raise ValueError("cursor identity fields must not be empty")
+        for field in ("epoch", "token_window_offset", "batch_index"):
+            _require_nonnegative_integer(getattr(self, field), field)
+        if any(type(value) is not str or not value for value in (self.document_id, self.batch_id)):
+            raise ValueError("cursor identity fields must be nonempty strings")
+        if (
+            type(self.next_sample_ids) is not tuple
+            or not self.next_sample_ids
+            or any(type(value) is not str or not value for value in self.next_sample_ids)
+        ):
+            raise ValueError("cursor sample IDs must be a nonempty tuple of strings")
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -144,6 +155,7 @@ class SyntheticBatchSource:
         return self._cursor(0)
 
     def cursor_at(self, batch_index: int) -> TrainingCursorV1:
+        _require_nonnegative_integer(batch_index, "batch_index")
         return self._cursor(batch_index)
 
     def batch(self, cursor: TrainingCursorV1) -> PreparedBatch:
@@ -281,6 +293,7 @@ class PreparedDatasetBatchSource:
         return self._cursor(0)
 
     def cursor_at(self, batch_index: int) -> TrainingCursorV1:
+        _require_nonnegative_integer(batch_index, "batch_index")
         return self._cursor(batch_index)
 
     def batch(self, cursor: TrainingCursorV1) -> PreparedBatch:
