@@ -93,6 +93,9 @@ class TrainingResult:
     final_state_digest: str
     run_fingerprint: str
     device: str
+    model_dtype: str
+    optimizer_step_dtype: str
+    caller_default_dtype: str
     torch_version: str
     python_version: str
     limitations: tuple[str, ...]
@@ -156,6 +159,37 @@ def run_training(
     failure_observer: Callable[[InjectedTrainingFailure], None] | None = None,
     commit_observer: Callable[[int, int], None] | None = None,
 ) -> tuple[TinyTransformer, TrainingResult]:
+    """Run a CPU FP32 model; bind AdamW's default scalar-counter dtype separately.
+
+    Caller device/dtype defaults are not changed. FP64 defaults produce FP64
+    AdamW counters and therefore a distinct checkpoint-resume contract.
+    """
+    with torch.device("cpu"):
+        return _run_training_cpu(
+            config,
+            output_dir,
+            resume_from=resume_from,
+            stop_after_step=stop_after_step,
+            dataset_manifest=dataset_manifest,
+            failure_point=failure_point,
+            failure_step=failure_step,
+            failure_observer=failure_observer,
+            commit_observer=commit_observer,
+        )
+
+
+def _run_training_cpu(
+    config: ExperimentConfig,
+    output_dir: Path,
+    *,
+    resume_from: Path | None = None,
+    stop_after_step: int | None = None,
+    dataset_manifest: Path | None = None,
+    failure_point: FailurePoint | None = None,
+    failure_step: int | None = None,
+    failure_observer: Callable[[InjectedTrainingFailure], None] | None = None,
+    commit_observer: Callable[[int, int], None] | None = None,
+) -> tuple[TinyTransformer, TrainingResult]:
     for name, value in (("stop_after_step", stop_after_step), ("failure_step", failure_step)):
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or value < 1
@@ -175,12 +209,21 @@ def run_training(
 
     source = _batch_source(config, dataset_manifest)
     implementation_fingerprint = code_fingerprint()
+    caller_default_dtype = torch.get_default_dtype()
+    execution = {
+        "device": "cpu",
+        "model_dtype": "torch.float32",
+        "optimizer_step_dtype": str(
+            torch.float64 if caller_default_dtype == torch.float64 else torch.float32
+        ),
+    }
     run_contract_fingerprint = state_digest(
         {
             "schema": "RunContractV1",
             "package_version": __version__,
             "command_contract": "fttl-train-smoke-v2",
             "model_architecture": "TinyTransformer-v1",
+            "execution": execution,
             "config_fingerprint": config.fingerprint(),
             "data_fingerprint": source.data_fingerprint,
             "tokenizer_fingerprint": source.tokenizer_fingerprint,
@@ -188,7 +231,7 @@ def run_training(
         }
     )
     seed_everything(config.seed)
-    model = TinyTransformer(config.model)
+    model = TinyTransformer(config.model, device="cpu", dtype=torch.float32)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     start_step = 0
     durable_step = 0
@@ -442,6 +485,9 @@ def run_training(
         final_state_digest=final_state_digest,
         run_fingerprint=run_fingerprint,
         device="cpu",
+        model_dtype=execution["model_dtype"],
+        optimizer_step_dtype=execution["optimizer_step_dtype"],
+        caller_default_dtype=str(caller_default_dtype),
         torch_version=torch.__version__,
         python_version=platform.python_version(),
         limitations=(
@@ -455,6 +501,8 @@ def run_training(
         output_dir / "manifest.json",
         {
             "schema": "RunManifestV2",
+            "execution": execution,
+            "caller_default_dtype": str(caller_default_dtype),
             "config": config.to_dict(),
             "config_fingerprint": config.fingerprint(),
             "data_fingerprint": source.data_fingerprint,

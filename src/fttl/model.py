@@ -39,12 +39,19 @@ def causal_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
 
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        config: ModelConfig,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
         super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
         self.n_heads = config.n_heads
         self.head_size = config.d_model // config.n_heads
-        self.qkv = nn.Linear(config.d_model, 3 * config.d_model)
-        self.output = nn.Linear(config.d_model, config.d_model)
+        self.qkv = nn.Linear(config.d_model, 3 * config.d_model, **factory_kwargs)
+        self.output = nn.Linear(config.d_model, config.d_model, **factory_kwargs)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
@@ -60,15 +67,22 @@ class CausalSelfAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        config: ModelConfig,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
         super().__init__()
-        self.attention_norm = nn.LayerNorm(config.d_model)
-        self.attention = CausalSelfAttention(config)
-        self.mlp_norm = nn.LayerNorm(config.d_model)
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.attention_norm = nn.LayerNorm(config.d_model, **factory_kwargs)
+        self.attention = CausalSelfAttention(config, **factory_kwargs)
+        self.mlp_norm = nn.LayerNorm(config.d_model, **factory_kwargs)
         self.mlp = nn.Sequential(
-            nn.Linear(config.d_model, 4 * config.d_model),
+            nn.Linear(config.d_model, 4 * config.d_model, **factory_kwargs),
             nn.GELU(),
-            nn.Linear(4 * config.d_model, config.d_model),
+            nn.Linear(4 * config.d_model, config.d_model, **factory_kwargs),
             nn.Dropout(config.dropout),
         )
 
@@ -78,14 +92,23 @@ class TransformerBlock(nn.Module):
 
 
 class TinyTransformer(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self,
+        config: ModelConfig,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
         super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
         self.config = config
-        self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
-        self.position_embedding = nn.Embedding(config.block_size, config.d_model)
-        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
-        self.final_norm = nn.LayerNorm(config.d_model)
-        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+        self.token_embedding = nn.Embedding(config.vocab_size, config.d_model, **factory_kwargs)
+        self.position_embedding = nn.Embedding(config.block_size, config.d_model, **factory_kwargs)
+        self.blocks = nn.ModuleList(
+            [TransformerBlock(config, **factory_kwargs) for _ in range(config.n_layers)]
+        )
+        self.final_norm = nn.LayerNorm(config.d_model, **factory_kwargs)
+        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False, **factory_kwargs)
         self.lm_head.weight = self.token_embedding.weight
         self.apply(self._initialize)
 
