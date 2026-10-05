@@ -23,6 +23,7 @@ From this repository's root, on Linux or macOS with Python 3.12 and
 
 ```bash
 uv sync --frozen --extra test
+uv run --frozen fttl-preflight --output artifacts/my-preflight-001.json
 uv run --frozen fttl-demo --output artifacts/my-demo-001
 ```
 
@@ -32,6 +33,9 @@ Training runs in Python, not in the browser. Use a new output directory each tim
 After dependency installation, this demo needs no network, GPU, account or API key.
 Its pinned CC0 fixture ships with the package, so the installed `fttl-demo`
 also works outside the checkout.
+Preflight checks CPU forward/backward, optimizer execution, local flush/rename,
+atomic JSON publication and exact checkpoint restore. Its private scratch files
+are removed; it does not claim power-loss durability or GPU readiness.
 
 Then [generate bounded byte tokens from the recovered checkpoint](docs/generation.md).
 The report binds inference to the verified model and dataset; it demonstrates a
