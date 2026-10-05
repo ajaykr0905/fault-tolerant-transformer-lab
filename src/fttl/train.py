@@ -156,8 +156,11 @@ def run_training(
     failure_observer: Callable[[InjectedTrainingFailure], None] | None = None,
     commit_observer: Callable[[int, int], None] | None = None,
 ) -> tuple[TinyTransformer, TrainingResult]:
-    if stop_after_step is not None and stop_after_step < 1:
-        raise ValueError("stop_after_step must be at least 1")
+    for name, value in (("stop_after_step", stop_after_step), ("failure_step", failure_step)):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+        ):
+            raise ValueError(f"{name} must be an integer at least 1")
     if failure_point is not None and failure_point not in FAILURE_POINTS:
         raise ValueError(f"unknown failure point {failure_point!r}")
     if failure_step is not None and failure_point is None:
@@ -242,7 +245,6 @@ def run_training(
 
     require_finite_state(model.state_dict(), "model state")
     require_finite_state(optimizer.state_dict(), "optimizer state")
-    output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / "checkpoints"
     final_step = min(
         config.steps,
@@ -263,6 +265,7 @@ def run_training(
         ):
             raise ValueError("checkpoint-write failure must target a checkpoint boundary")
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     checkpoint_generation = 0
     final_logits: torch.Tensor | None = None

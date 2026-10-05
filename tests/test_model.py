@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from fttl.config import ModelConfig
@@ -32,3 +33,33 @@ def test_future_tokens_do_not_change_past_logits():
         first_logits, _ = model(first)
         second_logits, _ = model(second)
     torch.testing.assert_close(first_logits[:, :3], second_logits[:, :3], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("shape", [(8,), (4, 2), (1, 8), (2, 4, 1)])
+def test_targets_cannot_silently_relabel_a_batch_with_the_same_element_count(shape):
+    model = TinyTransformer(ModelConfig(vocab_size=16, block_size=4, d_model=8, n_heads=2))
+    tokens = torch.arange(8).reshape(2, 4)
+    targets = tokens.reshape(shape)
+    before = torch.get_rng_state().clone()
+    with pytest.raises(ValueError, match="targets.*shape"):
+        model(tokens, targets)
+    assert torch.equal(torch.get_rng_state(), before)
+
+
+@pytest.mark.parametrize("shape", [(0, 4), (2, 0), (0, 0)])
+def test_empty_batches_fail_instead_of_returning_nonfinite_loss(shape):
+    model = TinyTransformer(ModelConfig(vocab_size=16, block_size=4, d_model=8, n_heads=2))
+    tokens = torch.empty(shape, dtype=torch.long)
+    with pytest.raises(ValueError, match="nonempty"):
+        model(tokens, tokens)
+
+
+def test_noncontiguous_but_correctly_aligned_targets_remain_supported():
+    model = TinyTransformer(ModelConfig(vocab_size=16, block_size=4, d_model=8, n_heads=2))
+    tokens = torch.arange(8).reshape(2, 4)
+    targets = torch.arange(8).reshape(4, 2).transpose(0, 1)
+    assert not targets.is_contiguous()
+    _, loss = model(tokens, targets)
+    assert loss is not None and torch.isfinite(loss)
+    loss.backward()
+    assert model.lm_head.weight.grad is not None

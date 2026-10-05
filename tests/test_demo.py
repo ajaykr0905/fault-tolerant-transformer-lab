@@ -100,6 +100,59 @@ def test_report_strings_are_escaped_in_the_offline_viewer(demo, tmp_path):
     assert "&lt;script&gt;" in page
 
 
+@pytest.mark.parametrize(
+    "file,field,value",
+    [
+        ("process-recovery-report", "interrupted_exitcode", 0),
+        ("process-recovery-report", "kill_signal", "SIGTERM"),
+        (
+            "process-recovery-report",
+            "worker_pids",
+            {"control": 1, "interrupted": 1, "replay": 2, "completion": 3},
+        ),
+        ("process-recovery-report", "equality", {"model_tensors": True}),
+        ("process-recovery-report", "durable_committed_steps_lost", 1),
+        ("process-recovery-report", "durable_committed_tokens_lost", 1),
+        ("process-recovery-report", "selected_step", 2),
+        ("process-recovery-report", "attempted_step", "<script>alert(1)</script>"),
+        ("process-recovery-report", "tokens_seen", True),
+        ("process-recovery-report", "replayed_sample_ids", ["different sample"]),
+        ("process-recovery-report", "failed_batch_id", "different batch"),
+        ("control/result", "optimizer_digest", "0" * 64),
+        ("recovered/result", "steps", 5),
+        ("recovered/result", "tokens_seen", 95),
+    ],
+)
+def test_preview_rejects_contradictory_kill_replay_and_trace_claims(
+    demo, tmp_path, file, field, value
+):
+    output, _ = demo
+    run = tmp_path / "altered"
+    shutil.copytree(output / "preview", run)
+    path = run / f"{file}.json"
+    record = json.loads(path.read_text())
+    record[field] = value
+    path.write_text(json.dumps(record))
+    destination = tmp_path / "preview"
+    with pytest.raises(ValueError, match="diverged"):
+        export_preview(run, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("seconds", [-1.0, float("nan"), float("inf"), True])
+def test_preview_rejects_invalid_measured_replay_timing(demo, tmp_path, seconds):
+    output, _ = demo
+    run = tmp_path / "altered"
+    shutil.copytree(output / "preview", run)
+    path = run / "process-recovery-report.json"
+    record = json.loads(path.read_text())
+    record["timings_seconds"]["resume_spawn_to_replayed_commit_receipt"] = seconds
+    path.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="diverged"):
+        export_preview(run, tmp_path / "preview")
+    assert not (tmp_path / "preview").exists()
+
+
 def test_modified_fixture_is_rejected_before_any_run(tmp_path):
     fixture = tmp_path / "fixture.jsonl"
     fixture.write_bytes(FIXTURE.read_bytes() + b"\n")

@@ -20,11 +20,108 @@ FIXTURE = Path("tests/fixtures/public_domain_peps_fixture.jsonl")
 FIXTURE_SHA256 = "da4e4fd7ac86f2129864570c0f288378c2a5063ec3079ae07ff6b29c918cae67"
 
 
+def _validate_preview(report: dict, control: dict, recovered: dict) -> None:
+    """Check V1 claim consistency, not authenticity of attacker-controlled evidence."""
+    required_checks = {
+        "batch_id_sequence",
+        "sample_id_sequence",
+        "loss_sequence",
+        "model_tensors",
+        "optimizer_tensors",
+        "rng_state",
+        "cursor",
+        "completed_steps",
+        "token_count",
+        "final_logits_tensors",
+        "final_logits_digest",
+        "final_checkpoint_state",
+        "final_state_digest",
+        "run_fingerprint",
+        "run_contract",
+        "staging_cleanup",
+    }
+    try:
+        pids = report["worker_pids"]
+        counts = (
+            "completed_steps",
+            "attempted_step",
+            "selected_step",
+            "durable_step_before_kill",
+            "tokens_seen",
+            "durable_committed_steps_lost",
+            "durable_committed_tokens_lost",
+        )
+        if (
+            report["schema"] != "ProcessRecoveryReportV1"
+            or report["kill_signal"] != "SIGKILL"
+            or report["interrupted_exitcode"] != -9
+            or report["process_start_method"] != "spawn"
+            or report["failure_point"] not in FAILURE_POINTS
+            or set(pids) != {"control", "interrupted", "replay", "completion"}
+            or any(type(pid) is not int or pid < 1 for pid in pids.values())
+            or len(set(pids.values())) != 4
+            or set(report["equality"]) != required_checks
+            or report["staging_cleanup_complete"] is not True
+            or any(type(report[name]) is not int for name in counts)
+            or not 1
+            <= report["selected_step"]
+            < report["attempted_step"]
+            <= report["completed_steps"]
+            or report["selected_step"] != report["durable_step_before_kill"]
+            or report["attempted_step"] != report["selected_step"] + 1
+            or report["durable_committed_steps_lost"] != 0
+            or report["durable_committed_tokens_lost"] != 0
+            or any(
+                type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0
+                for seconds in report["timings_seconds"].values()
+            )
+        ):
+            raise ValueError("refusing to display a diverged run as verified")
+        for field in (
+            "losses",
+            "batch_ids",
+            "sample_ids",
+            "final_cursor",
+            "model_digest",
+            "optimizer_digest",
+            "rng_digest",
+            "final_logits_digest",
+            "final_state_digest",
+            "config_fingerprint",
+            "data_fingerprint",
+            "tokenizer_fingerprint",
+            "run_contract_fingerprint",
+            "run_fingerprint",
+            "code_fingerprint",
+            "steps",
+            "tokens_seen",
+        ):
+            if control[field] != recovered[field]:
+                raise ValueError("refusing to display a diverged run as verified")
+        for trace in (control, recovered):
+            if (
+                type(trace["steps"]) is not int
+                or type(trace["tokens_seen"]) is not int
+                or trace["steps"] != report["completed_steps"]
+                or trace["tokens_seen"] != report["tokens_seen"]
+                or len(trace["batch_ids"]) != trace["steps"]
+                or len(trace["sample_ids"]) != trace["steps"]
+                or report["failed_batch_id"] != report["replayed_batch_id"]
+                or report["failed_batch_id"] != trace["batch_ids"][report["attempted_step"] - 1]
+                or report["failed_sample_ids"] != report["replayed_sample_ids"]
+                or report["failed_sample_ids"] != trace["sample_ids"][report["attempted_step"] - 1]
+            ):
+                raise ValueError("refusing to display a diverged run as verified")
+    except (KeyError, TypeError, AttributeError, IndexError, OverflowError) as error:
+        raise ValueError("refusing to display a diverged run as verified") from error
+
+
 def export_preview(run: Path, destination: Path) -> None:
     """Render measured results, never run a simulated crash or relabel a failed proof."""
     report = json.loads((run / "process-recovery-report.json").read_text())
     control = json.loads((run / "control/result.json").read_text())
     recovered = json.loads((run / "recovered/result.json").read_text())
+    _validate_preview(report, control, recovered)
     losses = control["losses"]
     if (
         report["exact_equality"] is not True
@@ -35,7 +132,7 @@ def export_preview(run: Path, destination: Path) -> None:
         or report["final_state_digest"] != recovered["final_state_digest"]
         or len(losses) != report["completed_steps"]
         or len(losses) < 2
-        or any(not math.isfinite(value) for value in losses)
+        or any(type(value) not in (int, float) or not math.isfinite(value) for value in losses)
     ):
         raise ValueError("refusing to display a diverged run as verified")
     destination.mkdir(parents=True, exist_ok=False)

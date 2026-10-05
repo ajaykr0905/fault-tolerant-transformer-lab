@@ -186,3 +186,28 @@ def test_code_identity_changes_comparison_fingerprint(monkeypatch, tmp_path):
     assert first.comparison_contract["execution"]["code_fingerprint"] == "0" * 64
     assert second.comparison_contract["execution"]["code_fingerprint"] == "1" * 64
     assert first.comparison_fingerprint != second.comparison_fingerprint
+
+
+def test_tuning_comparison_preserves_existing_evidence_and_rng(tmp_path):
+    output = tmp_path / "result.json"
+    output.write_bytes(b"existing experiment evidence\n")
+    before = state_digest(capture_rng_state())
+    with pytest.raises(ValueError, match="fresh"):
+        ablation.compare_tuning(_config(0.35), output, rank=2)
+    assert output.read_bytes() == b"existing experiment evidence\n"
+    assert state_digest(capture_rng_state()) == before
+
+
+def test_tuning_comparison_cannot_overwrite_a_report_created_during_training(monkeypatch, tmp_path):
+    output = tmp_path / "result.json"
+    original = ablation._train
+
+    def racing_train(model, config, mode):
+        if mode == "lora":
+            output.write_bytes(b"concurrent evidence\n")
+        return original(model, config, mode)
+
+    monkeypatch.setattr(ablation, "_train", racing_train)
+    with pytest.raises(FileExistsError):
+        ablation.compare_tuning(_config(0.35), output, rank=2)
+    assert output.read_bytes() == b"concurrent evidence\n"
