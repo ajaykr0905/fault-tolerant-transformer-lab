@@ -88,8 +88,27 @@ def _train(model: TinyTransformer, config: ExperimentConfig, mode: str) -> Tunin
 
 
 def compare_tuning(config: ExperimentConfig, output: Path, *, rank: int = 4) -> TuningComparison:
+    """Compare paired CPU arms without consuming caller RNGs or changing determinism."""
+    if not isinstance(config, ExperimentConfig):
+        raise ValueError("config must be an ExperimentConfig")
+    if not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= config.model.d_model:
+        raise ValueError("rank must be an integer fitting the base linear dimensions")
     if output.exists() or output.is_symlink():
         raise ValueError("tuning comparison requires a fresh output file")
+
+    caller_rng = capture_rng_state()
+    caller_deterministic = torch.are_deterministic_algorithms_enabled()
+    caller_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        return _compare_tuning(config, output, rank=rank)
+    finally:
+        try:
+            restore_rng_state(caller_rng)
+        finally:
+            torch.use_deterministic_algorithms(caller_deterministic, warn_only=caller_warn_only)
+
+
+def _compare_tuning(config: ExperimentConfig, output: Path, *, rank: int) -> TuningComparison:
     seed_everything(config.seed)
     baseline = TinyTransformer(config.model)
     base_state = copy.deepcopy(baseline.state_dict())
