@@ -7,6 +7,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from itertools import islice
 
 import torch
 
@@ -46,6 +47,15 @@ def _integer(value: object, name: str, minimum: int, maximum: int) -> None:
         raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
 
 
+def _require_configuration(model: TinyTransformer, expected: str) -> None:
+    try:
+        actual = json.dumps(asdict(model.config), sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("model configuration changed during generation") from error
+    if actual != expected:
+        raise ValueError("model configuration changed during generation")
+
+
 def generate_tokens(
     model: TinyTransformer,
     prompt: Sequence[int] | bytes,
@@ -63,10 +73,15 @@ def generate_tokens(
     Equal logits prefer the lower token ID, including a top-k cutoff tie. A stop
     token in the prompt does not stop generation; a newly emitted stop is included.
     Cropping resets learned position IDs to zero on every uncached forward pass.
+    Sequence capture is bounded and checked against its declared length. Runtime
+    configuration drift rejects the result; arbitrary callback changes are not undone.
     """
     if not isinstance(model, TinyTransformer):
         raise ValueError("generation requires a TinyTransformer")
-    vocabulary = model.config.vocab_size
+    source_config = model.config
+    configuration = json.dumps(asdict(source_config), sort_keys=True, separators=(",", ":"))
+    vocabulary = source_config.vocab_size
+    block_size = source_config.block_size
     _integer(max_new_tokens, "max_new_tokens", 0, MAX_NEW_TOKENS)
     _integer(seed, "seed", 0, 2**63 - 1)
     if not isinstance(method, str) or method not in {"greedy", "sample"}:
@@ -88,11 +103,19 @@ def generate_tokens(
         _integer(stop_token_id, "stop_token_id", 0, vocabulary - 1)
     if isinstance(prompt, str) or not isinstance(prompt, Sequence):
         raise ValueError("prompt must be a nonempty integer sequence or bytes")
-    if not 1 <= len(prompt) <= MAX_PROMPT_TOKENS:
-        raise ValueError(f"prompt must contain between 1 and {MAX_PROMPT_TOKENS} token IDs")
-    prompt_ids = tuple(prompt)
-    for token_id in prompt_ids:
-        _integer(token_id, "prompt token", 0, vocabulary - 1)
+    prompt_rng = capture_rng_state()
+    try:
+        declared_length = len(prompt)
+        prompt_ids = tuple(islice(prompt, MAX_PROMPT_TOKENS + 1))
+        if not 1 <= len(prompt_ids) <= MAX_PROMPT_TOKENS:
+            raise ValueError(f"prompt must contain between 1 and {MAX_PROMPT_TOKENS} token IDs")
+        if len(prompt_ids) != declared_length:
+            raise ValueError("prompt captured length does not match its declared length")
+        for token_id in prompt_ids:
+            _integer(token_id, "prompt token", 0, vocabulary - 1)
+    finally:
+        restore_rng_state(prompt_rng)
+    _require_configuration(model, configuration)
     if any(value.device.type != "cpu" for value in (*model.parameters(), *model.buffers())):
         raise ValueError("generation supports CPU models only")
     # Non-persistent buffers are omitted from state_dict but still participate in
@@ -112,7 +135,6 @@ def generate_tokens(
     require_finite_state(source_state, "model state")
     runtime_identity = state_digest(source_state)
     identity = state_digest(model.state_dict())
-    configuration = json.dumps(asdict(model.config), sort_keys=True, separators=(",", ":"))
     modes = [(module, module.training) for module in model.modules()]
     caller_rng = capture_rng_state()
     generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -121,11 +143,14 @@ def generate_tokens(
     reason = "max_new_tokens"
     try:
         model.eval()
+        _require_configuration(model, configuration)
         with torch.inference_mode(), torch.device("cpu"):
             for _ in range(max_new_tokens):
-                context = all_ids[-model.config.block_size :]
+                _require_configuration(model, configuration)
+                context = all_ids[-block_size:]
                 tokens = torch.tensor([context], dtype=torch.long, device="cpu")
                 logits, _ = model(tokens)
+                _require_configuration(model, configuration)
                 if (
                     not isinstance(logits, torch.Tensor)
                     or logits.device.type != "cpu"
@@ -157,6 +182,7 @@ def generate_tokens(
                 if selected == stop_token_id:
                     reason = "stop_token"
                     break
+        _require_configuration(model, configuration)
         current_source_state = {
             "parameters": dict(model.named_parameters()),
             "buffers": dict(model.named_buffers()),
@@ -166,6 +192,7 @@ def generate_tokens(
             or state_digest(current_source_state) != runtime_identity
         ):
             raise ValueError("model state changed during generation")
+        _require_configuration(model, configuration)
         return GenerationResultV1(
             schema_version=1,
             prompt_token_ids=prompt_ids,
