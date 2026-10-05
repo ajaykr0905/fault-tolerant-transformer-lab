@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 import pytest
 from test_training_cursor import Document, config
@@ -69,12 +70,21 @@ def test_cursor_at_validates_before_indexing_or_formatting(kind, value, monkeypa
 
 @pytest.mark.parametrize("kind", ["synthetic", "prepared"])
 @pytest.mark.parametrize("index", [0, 1, 7, 10**9])
-def test_valid_indexed_cursors_remain_roundtrippable_and_keep_existing_batch_ids(kind, index):
+def test_valid_indexed_cursors_roundtrip_with_explicit_v2_source_bound_batch_ids(kind, index):
     source = _source(kind)
     cursor = source.cursor_at(index)
     assert TrainingCursorV1.from_dict(cursor.to_dict()) == cursor
+    contract = source.batch_identity_contract
+    assert contract["algorithm"] == "source-bound-batch-v2"
+    identity = {
+        "contract": contract,
+        "batch_index": index,
+        "sample_ids": list(cursor.next_sample_ids),
+    }
     expected = hashlib.sha256(
-        f"{index}\n".encode() + "\n".join(cursor.next_sample_ids).encode()
+        json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
     ).hexdigest()
     assert cursor.batch_id == expected
     assert source.batch(cursor).batch_id == expected
