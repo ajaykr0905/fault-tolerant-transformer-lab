@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import os
-import random
 from collections.abc import Mapping
 from typing import Any
 
-import numpy as np
 import torch
 
-from fttl.state import capture_rng_state, restore_rng_state
+from fttl.state import capture_rng_state, restore_rng_state, validate_cpu_rng_state
 
 _prepared_workspace: str | None = None
 
@@ -78,34 +76,6 @@ def prepare_cuda_execution() -> tuple[torch.device, dict[str, Any]]:
     }
     _prepared_workspace = workspace
     return device, metadata
-
-
-def _tuple_tree(value: Any) -> Any:
-    return tuple(_tuple_tree(item) for item in value) if isinstance(value, list) else value
-
-
-def validate_cpu_rng_state(state: Mapping[str, Any]) -> None:
-    """Validate checkpoint CPU RNGs with isolated candidates, without restoring them."""
-    if not isinstance(state, Mapping):
-        raise ValueError("RNG state must be a mapping")
-    try:
-        random.Random().setstate(_tuple_tree(state["python"]))
-        numpy_state = state["numpy"]
-        np.random.RandomState().set_state(
-            (
-                str(numpy_state["bit_generator"]),
-                np.asarray(numpy_state["keys"], dtype=np.uint32),
-                int(numpy_state["position"]),
-                int(numpy_state["has_gauss"]),
-                float(numpy_state["cached_gaussian"]),
-            )
-        )
-        tensor = state["torch_cpu"]
-        if not isinstance(tensor, torch.Tensor) or tensor.device.type != "cpu":
-            raise ValueError("CPU Torch RNG state must be a CPU tensor")
-        torch.Generator(device="cpu").set_state(tensor)
-    except (KeyError, TypeError, ValueError, RuntimeError, OverflowError) as error:
-        raise ValueError(f"invalid CPU RNG state: {error}") from error
 
 
 def validate_cuda_rng_state(state: Mapping[str, Any], device: torch.device) -> None:

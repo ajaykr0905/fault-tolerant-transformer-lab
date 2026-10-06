@@ -367,10 +367,19 @@ def load_dataset_snapshot(path: Path) -> PreparedDatasetSnapshot:
     return PreparedDatasetSnapshot(manifest_bytes, document_bytes)
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise DatasetValidationError(f"duplicate JSON object key {key!r}")
+        result[key] = value
+    return result
+
+
 def _manifest_from_bytes(content: bytes) -> DatasetManifestV1:
     try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        payload = json.loads(content.decode("utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, DatasetValidationError) as error:
         raise DatasetValidationError(f"cannot read dataset manifest: {error}") from error
     if not isinstance(payload, dict):
         raise DatasetValidationError("dataset manifest root must be a JSON object")
@@ -429,9 +438,11 @@ def _read_gzip_records(path: Path) -> Iterator[Mapping[str, object]]:
                     raise DatasetValidationError(f"record {line_number} exceeds the per-document safety limit")
                 try:
                     decoded = raw_line.decode("utf-8")
-                    record = json.loads(decoded)
-                except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                    raise DatasetValidationError(f"record {line_number} is not valid UTF-8 JSON") from error
+                    record = json.loads(decoded, object_pairs_hook=_unique_json_object)
+                except (UnicodeDecodeError, json.JSONDecodeError, DatasetValidationError) as error:
+                    raise DatasetValidationError(
+                        f"record {line_number} is not valid UTF-8 JSON: {error}"
+                    ) from error
                 if not isinstance(record, dict):
                     raise DatasetValidationError(f"record {line_number} must be a JSON object")
                 yield record
@@ -730,10 +741,10 @@ def _iter_prepared_documents(content: bytes) -> Iterator[PreparedDocument]:
         lines = io.StringIO(content.decode("utf-8"))
         for line_number, line in enumerate(lines, start=1):
             try:
-                row = json.loads(line)
-            except json.JSONDecodeError as error:
+                row = json.loads(line, object_pairs_hook=_unique_json_object)
+            except (json.JSONDecodeError, DatasetValidationError) as error:
                 raise DatasetValidationError(
-                    f"prepared document {line_number} is invalid JSON"
+                    f"prepared document {line_number} is invalid JSON: {error}"
                 ) from error
             if not isinstance(row, dict):
                 raise DatasetValidationError(f"prepared document {line_number} must be an object")

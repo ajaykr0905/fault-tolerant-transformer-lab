@@ -10,6 +10,22 @@ import torch
 
 from fttl.config import ExperimentConfig
 from fttl.dataset import PreparedDatasetSnapshot, load_dataset_snapshot
+from fttl.state import state_digest
+
+BATCH_IDENTITY_ALGORITHM = "source-bound-batch-v2"
+
+
+def _bound_batch_id(contract: dict[str, object], index: int, sample_ids: tuple[str, ...]) -> str:
+    identity = {"contract": contract, "batch_index": index, "sample_ids": list(sample_ids)}
+    canonical = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _require_nonnegative_integer(value: int, field: str) -> None:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"cursor {field} must be a non-negative integer")
 
 
 @dataclass(frozen=True)
@@ -25,12 +41,18 @@ class TrainingCursorV1:
     batch_index: int
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version != 1:
             raise ValueError("TrainingCursorV1 requires schema_version=1")
-        if self.epoch < 0 or self.token_window_offset < 0 or self.batch_index < 0:
-            raise ValueError("cursor counters must be non-negative")
-        if not self.document_id or not self.batch_id or not self.next_sample_ids:
-            raise ValueError("cursor identity fields must not be empty")
+        for field in ("epoch", "token_window_offset", "batch_index"):
+            _require_nonnegative_integer(getattr(self, field), field)
+        if any(type(value) is not str or not value for value in (self.document_id, self.batch_id)):
+            raise ValueError("cursor identity fields must be nonempty strings")
+        if (
+            type(self.next_sample_ids) is not tuple
+            or not self.next_sample_ids
+            or any(type(value) is not str or not value for value in self.next_sample_ids)
+        ):
+            raise ValueError("cursor sample IDs must be a nonempty tuple of strings")
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -118,14 +140,30 @@ class SyntheticBatchSource:
             f"synthetic-integer-v1:{config.model.vocab_size}".encode("utf-8")
         ).hexdigest()
 
-    def _cursor(self, batch_index: int) -> TrainingCursorV1:
+    def _batch_contract(self, tokens: torch.Tensor) -> dict[str, object]:
+        return {
+            "algorithm": BATCH_IDENTITY_ALGORITHM,
+            "source_kind": "synthetic-token-stream-v1",
+            "data_fingerprint": self.data_fingerprint,
+            "tokenizer_fingerprint": self.tokenizer_fingerprint,
+            "content_fingerprint": state_digest(tokens),
+            "block_size": self.config.model.block_size,
+            "batch_size": self.config.batch_size,
+        }
+
+    @property
+    def batch_identity_contract(self) -> dict[str, object]:
+        return self._batch_contract(self.tokens.detach().clone())
+
+    def _cursor(
+        self, batch_index: int, *, tokens: torch.Tensor | None = None
+    ) -> TrainingCursorV1:
+        captured = self.tokens.detach().clone() if tokens is None else tokens
         sample_ids = tuple(
             f"synthetic:{batch_index:08d}:{index:04d}"
             for index in range(self.config.batch_size)
         )
-        batch_id = hashlib.sha256(
-            f"{batch_index}\n".encode("utf-8") + "\n".join(sample_ids).encode("utf-8")
-        ).hexdigest()
+        batch_id = _bound_batch_id(self._batch_contract(captured), batch_index, sample_ids)
         return TrainingCursorV1(
             schema_version=1,
             epoch=0,
@@ -144,20 +182,22 @@ class SyntheticBatchSource:
         return self._cursor(0)
 
     def cursor_at(self, batch_index: int) -> TrainingCursorV1:
+        _require_nonnegative_integer(batch_index, "batch_index")
         return self._cursor(batch_index)
 
     def batch(self, cursor: TrainingCursorV1) -> PreparedBatch:
-        expected = self._cursor(cursor.batch_index)
+        captured = self.tokens.detach().clone()
+        expected = self._cursor(cursor.batch_index, tokens=captured)
         if cursor != expected:
             raise ValueError("synthetic training cursor does not match the requested batch")
-        inputs, targets = batch_for_step(self.tokens, self.config, cursor.batch_index)
+        inputs, targets = batch_for_step(captured, self.config, cursor.batch_index)
         return PreparedBatch(
             inputs=inputs,
             targets=targets,
             batch_id=cursor.batch_id,
             sample_ids=cursor.next_sample_ids,
             cursor=cursor,
-            next_cursor=self._cursor(cursor.batch_index + 1),
+            next_cursor=self._cursor(cursor.batch_index + 1, tokens=captured),
         )
 
 
@@ -195,8 +235,15 @@ class PreparedDatasetBatchSource:
         self.tokenizer_fingerprint = tokenizer_fingerprint
         width = config.model.block_size + 1
         windows_by_document: list[tuple[_TokenWindow, ...]] = []
-        for document in sorted(documents, key=lambda item: item.document_id):
-            encoded = tuple(document.text.encode("utf-8")) + (256,)
+        content_digest = hashlib.sha256()
+        captured_documents = sorted(
+            ((document.document_id, document.text) for document in documents), key=lambda item: item[0]
+        )
+        for document_id, text in captured_documents:
+            encoded_bytes = text.encode("utf-8")
+            identity = [document_id, hashlib.sha256(encoded_bytes).hexdigest()]
+            content_digest.update(json.dumps(identity, ensure_ascii=False).encode("utf-8") + b"\n")
+            encoded = tuple(encoded_bytes) + (256,)
             if len(encoded) < width:
                 continue
             offsets = list(range(0, len(encoded) - width + 1, config.model.block_size))
@@ -206,7 +253,7 @@ class PreparedDatasetBatchSource:
             windows_by_document.append(
                 tuple(
                     _TokenWindow(
-                        document_id=document.document_id,
+                        document_id=document_id,
                         offset=offset,
                         tokens=encoded[offset : offset + width],
                     )
@@ -224,6 +271,19 @@ class PreparedDatasetBatchSource:
         if len(windows) < config.batch_size:
             raise ValueError("prepared dataset has fewer full windows than one batch")
         self._windows = tuple(windows)
+        self._content_fingerprint = content_digest.hexdigest()
+
+    @property
+    def batch_identity_contract(self) -> dict[str, object]:
+        return {
+            "algorithm": BATCH_IDENTITY_ALGORITHM,
+            "source_kind": "prepared-document-local-interleaved-windows-v1",
+            "data_fingerprint": self.data_fingerprint,
+            "tokenizer_fingerprint": self.tokenizer_fingerprint,
+            "content_fingerprint": self._content_fingerprint,
+            "block_size": self.config.model.block_size,
+            "batch_size": self.config.batch_size,
+        }
 
     @classmethod
     def from_manifest(
@@ -262,9 +322,7 @@ class PreparedDatasetBatchSource:
         indices = self._window_indices(batch_index)
         selected = tuple(self._windows[index] for index in indices)
         sample_ids = tuple(window.sample_id for window in selected)
-        batch_id = hashlib.sha256(
-            f"{batch_index}\n".encode("utf-8") + "\n".join(sample_ids).encode("utf-8")
-        ).hexdigest()
+        batch_id = _bound_batch_id(self.batch_identity_contract, batch_index, sample_ids)
         absolute_start = batch_index * self.config.batch_size
         first = selected[0]
         return TrainingCursorV1(
@@ -281,6 +339,7 @@ class PreparedDatasetBatchSource:
         return self._cursor(0)
 
     def cursor_at(self, batch_index: int) -> TrainingCursorV1:
+        _require_nonnegative_integer(batch_index, "batch_index")
         return self._cursor(batch_index)
 
     def batch(self, cursor: TrainingCursorV1) -> PreparedBatch:

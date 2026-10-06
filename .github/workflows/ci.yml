@@ -71,6 +71,40 @@ jobs:
           --rank 2 --max-eval-tokens 128
           --output "${RUNNER_TEMP}/fttl-ci-public-tuning/result.json"
 
+      - name: Generate bounded tokens from the recovered offline checkpoint
+        run: |
+          uv run --frozen fttl-generate \
+            --config "${RUNNER_TEMP}/fttl-ci-demo/config.json" \
+            --checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/recovered/checkpoints" \
+            --dataset-manifest "${RUNNER_TEMP}/fttl-ci-demo/dataset/manifest.json" \
+            --prompt Hello --max-new-tokens 4 \
+            --output "${RUNNER_TEMP}/fttl-ci-generation.json"
+
+      - name: Verify recovery preserves greedy and seeded inference tokens
+        run: >-
+          uv run --frozen fttl-verify-inference-parity
+          --config "${RUNNER_TEMP}/fttl-ci-demo/config.json"
+          --control-checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/control/checkpoints"
+          --recovered-checkpoint "${RUNNER_TEMP}/fttl-ci-demo/run/recovered/checkpoints"
+          --dataset-manifest "${RUNNER_TEMP}/fttl-ci-demo/dataset/manifest.json"
+          --prompt Hello --prompt Recovery --max-new-tokens 4
+          --output "${RUNNER_TEMP}/fttl-ci-inference-parity.json"
+
+      - name: Prove the built wheel runs the offline demo outside the checkout
+        run: |
+          uv build --wheel --out-dir "${RUNNER_TEMP}/fttl-ci-wheel"
+          set -- "${RUNNER_TEMP}/fttl-ci-wheel/"*.whl
+          test "$#" -eq 1
+          test -f "$1"
+          unzip -q "$1" -d "${RUNNER_TEMP}/fttl-ci-wheel-expanded"
+          cd "${RUNNER_TEMP}"
+          PYTHONPATH="${RUNNER_TEMP}/fttl-ci-wheel-expanded" \
+            "${GITHUB_WORKSPACE}/.venv/bin/python" -c \
+            'from pathlib import Path; import fttl; from fttl.demo import FIXTURE; assert Path(fttl.__file__).parent == FIXTURE.parent.parent; assert "fttl-ci-wheel-expanded" in str(FIXTURE)'
+          PYTHONPATH="${RUNNER_TEMP}/fttl-ci-wheel-expanded" \
+            "${GITHUB_WORKSPACE}/.venv/bin/fttl-demo" \
+            --output "${RUNNER_TEMP}/fttl-ci-wheel-demo"
+
       - name: Verify checks did not modify tracked files
         run: |
           git diff --check

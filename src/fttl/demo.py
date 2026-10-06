@@ -16,7 +16,7 @@ from fttl.dataset import DatasetSource, prepare_document_records
 from fttl.process_recovery import verify_process_recovery
 from fttl.train import FAILURE_POINTS
 
-FIXTURE = Path("tests/fixtures/public_domain_peps_fixture.jsonl")
+FIXTURE = Path(__file__).resolve().parent / "assets/public_domain_peps_fixture.jsonl"
 FIXTURE_SHA256 = "da4e4fd7ac86f2129864570c0f288378c2a5063ec3079ae07ff6b29c918cae67"
 
 
@@ -241,7 +241,7 @@ def run_demo(
     failure_point: str = "during-checkpoint-write",
     preview_dir: Path | None = None,
 ) -> Path:
-    """Run a bounded offline proof using the repository's six-document CC0 fixture."""
+    """Run a bounded offline proof using the packaged six-document CC0 fixture."""
     if os.name != "posix":
         raise ValueError("the demo requires Linux/macOS with POSIX SIGKILL")
     if failure_point not in FAILURE_POINTS:

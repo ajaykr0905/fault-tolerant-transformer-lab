@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
+import math
 import os
 import re
 import shutil
+import time
 import uuid
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -23,7 +28,13 @@ from typing import Any, Callable, Mapping
 import torch
 
 from fttl.config import ExperimentConfig
+from fttl.numerical import require_finite_state
 from fttl.state import capture_rng_state, restore_rng_state
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 CHECKPOINT_SCHEMA_VERSION = 2
 DEFAULT_DATA_FINGERPRINT = "synthetic-token-stream-v1"
@@ -32,6 +43,7 @@ DEFAULT_RUN_CONTRACT_FINGERPRINT = "training-contract-v2"
 STATE_FILENAME = "state.pt"
 MANIFEST_FILENAME = "manifest.json"
 LATEST_FILENAME = "LATEST"
+WRITER_LOCK_FILENAME = ".writer.lock"
 _GENERATION_PATTERN = re.compile(r"^generation-(\d{8})$")
 _REQUIRED_STATE_KEYS = frozenset(
     {
@@ -65,6 +77,38 @@ class CheckpointIntegrityError(OSError):
 FailureInjector = Callable[[str], None]
 
 
+def _validate_schema(value: Any, expected: int, label: str) -> None:
+    if type(value) is not int:
+        raise CheckpointIntegrityError(f"checkpoint {label} schema must be an integer")
+    if value != expected:
+        raise CheckpointMismatchError(f"unsupported checkpoint {label} schema")
+
+
+def _validate_counter(value: Any, label: str, minimum: int = 0) -> None:
+    if type(value) is not int or value < minimum:
+        raise CheckpointIntegrityError(
+            f"checkpoint {label} must be an integer greater than or equal to {minimum}"
+        )
+
+
+def _validate_cursor(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise CheckpointIntegrityError("checkpoint cursor must be an object or null")
+    # Generic history cursors remain supported; versioned training cursors use
+    # the same strict constructor as their data-source consumers.
+    if "schema_version" in value:
+        from fttl.data import TrainingCursorV1
+
+        try:
+            TrainingCursorV1.from_dict(value)
+        except (TypeError, ValueError) as error:
+            raise CheckpointIntegrityError(
+                f"checkpoint training cursor is invalid: {error}"
+            ) from error
+
+
 @dataclass(frozen=True)
 class CheckpointManifestV2:
     """Public metadata binding one checkpoint generation to its training inputs."""
@@ -82,6 +126,14 @@ class CheckpointManifestV2:
     run_contract_fingerprint: str
     state_keys: tuple[str, ...]
     cursor: dict[str, Any] | None
+
+    def __post_init__(self) -> None:
+        _validate_schema(self.schema_version, CHECKPOINT_SCHEMA_VERSION, "manifest")
+        _validate_counter(self.generation, "generation", 1)
+        _validate_counter(self.state_bytes, "byte length", 1)
+        _validate_counter(self.completed_step, "completed step")
+        _validate_counter(self.tokens_seen, "token count")
+        _validate_cursor(self.cursor)
 
     @property
     def dataset_fingerprint(self) -> str:
@@ -116,16 +168,7 @@ class CheckpointManifestV2:
             raise CheckpointIntegrityError(
                 f"checkpoint manifest is missing keys: {', '.join(missing)}"
             )
-        if value["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-            raise CheckpointMismatchError("unsupported checkpoint manifest schema")
-        for field, label in (
-            ("generation", "generation"),
-            ("state_bytes", "byte length"),
-            ("completed_step", "completed step"),
-            ("tokens_seen", "token count"),
-        ):
-            if not isinstance(value[field], int) or isinstance(value[field], bool):
-                raise CheckpointIntegrityError(f"checkpoint {label} must be an integer")
+        _validate_schema(value["schema_version"], CHECKPOINT_SCHEMA_VERSION, "manifest")
         if not isinstance(value["state_keys"], list) or not all(
             isinstance(item, str) for item in value["state_keys"]
         ):
@@ -309,6 +352,30 @@ def _read_manifest(path: Path) -> CheckpointManifestV2:
     return CheckpointManifestV2.from_dict(raw)
 
 
+def _require_dense_checkpoint_state(value: Any, label: str) -> None:
+    if isinstance(value, torch.Tensor):
+        if value.layout != torch.strided or value.device.type == "meta":
+            raise ValueError(f"{label} must be a materialized dense tensor")
+    elif isinstance(value, Mapping):
+        for name, item in value.items():
+            _require_dense_checkpoint_state(item, f"{label}.{name}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for index, item in enumerate(value):
+            _require_dense_checkpoint_state(item, f"{label}[{index}]")
+
+
+def _validate_checkpoint_numerics(value: Any) -> None:
+    _require_dense_checkpoint_state(value, "checkpoint state")
+    require_finite_state(value, "checkpoint state")
+
+
+def _validate_stored_numerics(payload: dict[str, Any]) -> None:
+    try:
+        _validate_checkpoint_numerics(payload)
+    except (FloatingPointError, ValueError, TypeError, RuntimeError, OverflowError) as error:
+        raise CheckpointIntegrityError(f"checkpoint numerical state is invalid: {error}") from error
+
+
 def _validate_generation_files(generation_dir: Path) -> CheckpointManifestV2:
     manifest = _read_manifest(generation_dir / MANIFEST_FILENAME)
     expected_name = f"generation-{manifest.generation:08d}"
@@ -393,6 +460,8 @@ def _assert_fingerprints(
 def _load_generation_payload(
     generation_dir: Path,
     *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     expected_config_fingerprint: str,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -407,8 +476,18 @@ def _load_generation_payload(
         expected_run_contract_fingerprint=expected_run_contract_fingerprint,
     )
     try:
+        state_snapshot = (generation_dir / manifest.state_file).read_bytes()
+    except OSError as error:
+        raise CheckpointIntegrityError("checkpoint state snapshot is unreadable") from error
+    if len(state_snapshot) != manifest.state_bytes:
+        raise CheckpointIntegrityError(
+            "checkpoint state snapshot byte length does not match manifest"
+        )
+    if hashlib.sha256(state_snapshot).hexdigest() != manifest.state_sha256:
+        raise CheckpointIntegrityError("checkpoint state snapshot SHA-256 does not match manifest")
+    try:
         payload = torch.load(
-            generation_dir / manifest.state_file,
+            io.BytesIO(state_snapshot),
             map_location="cpu",
             weights_only=True,
         )
@@ -423,8 +502,10 @@ def _load_generation_payload(
         raise CheckpointIntegrityError(
             f"checkpoint state is missing keys: {', '.join(missing)}"
         )
-    if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-        raise CheckpointMismatchError("unsupported checkpoint state schema")
+    _validate_schema(payload["schema_version"], CHECKPOINT_SCHEMA_VERSION, "state")
+    _validate_counter(payload["step"], "completed step")
+    _validate_counter(payload["tokens_seen"], "token count")
+    _validate_cursor(payload["cursor"])
     if payload.get("config_fingerprint") != manifest.config_fingerprint:
         raise CheckpointIntegrityError("checkpoint state and manifest configuration differ")
     if payload.get("data_fingerprint") != manifest.data_fingerprint:
@@ -439,7 +520,87 @@ def _load_generation_payload(
         raise CheckpointIntegrityError("checkpoint state and manifest token counts differ")
     if payload.get("cursor") != manifest.cursor:
         raise CheckpointIntegrityError("checkpoint state and manifest cursors differ")
+    _validate_stored_numerics(payload)
+    _validate_model_aliases(model, payload["model"])
+    _validate_adam_state(optimizer, payload["optimizer"])
     return payload, manifest
+
+
+def _validate_adam_state(optimizer: torch.optim.Optimizer, value: Any) -> None:
+    if type(optimizer) not in (torch.optim.Adam, torch.optim.AdamW):
+        return
+
+    def invalid() -> None:
+        raise CheckpointIntegrityError(
+            "checkpoint Adam initialized state or parameter binding is invalid"
+        )
+
+    if not isinstance(value, Mapping):
+        invalid()
+    groups, states = value.get("param_groups"), value.get("state")
+    if not isinstance(groups, list) or not isinstance(states, Mapping):
+        invalid()
+    if len(groups) != len(optimizer.param_groups):
+        invalid()
+    bindings = {}
+    for saved, current in zip(groups, optimizer.param_groups, strict=True):
+        if not isinstance(saved, Mapping) or not isinstance(saved.get("params"), list):
+            invalid()
+        if len(saved["params"]) != len(current["params"]):
+            invalid()
+        for key, parameter in zip(saved["params"], current["params"], strict=True):
+            if type(key) is not int or (key in bindings and bindings[key][0] is not parameter):
+                invalid()
+            bindings[key] = (parameter, saved.get("amsgrad", False))
+    for key, state in states.items():
+        if type(key) is not int or key not in bindings or not isinstance(state, Mapping):
+            invalid()
+        if not state:
+            continue
+        parameter, amsgrad = bindings[key]
+        required = {"exp_avg", "exp_avg_sq", "step"}
+        if amsgrad:
+            required.add("max_exp_avg_sq")
+        if not required.issubset(state):
+            invalid()
+        for name in required.difference({"step"}):
+            moment = state[name]
+            if not isinstance(moment, torch.Tensor) or moment.shape != parameter.shape:
+                invalid()
+        step = state["step"]
+        if isinstance(step, torch.Tensor):
+            if step.numel() != 1 or step.is_complex() or step.dtype == torch.bool:
+                invalid()
+            step = step.item()
+        if type(step) not in (int, float) or step < 0:
+            invalid()
+
+
+def _validate_model_aliases(model: torch.nn.Module, state: Mapping[str, Any]) -> None:
+    """Reject contradictory values for declared shared parameter/buffer objects."""
+    aliases: dict[int, list[str]] = {}
+    for name, tensor in (
+        *model.named_parameters(remove_duplicate=False),
+        *model.named_buffers(remove_duplicate=False),
+    ):
+        if name in state:
+            aliases.setdefault(id(tensor), []).append(name)
+    for names in aliases.values():
+        if len(names) < 2:
+            continue
+        first = state[names[0]]
+        for name in names[1:]:
+            other = state[name]
+            if (
+                not isinstance(first, torch.Tensor)
+                or not isinstance(other, torch.Tensor)
+                or first.shape != other.shape
+                or first.dtype != other.dtype
+                or not torch.equal(first, other)
+            ):
+                raise CheckpointIntegrityError(
+                    f"checkpoint model aliases contain conflicting values: {', '.join(names)}"
+                )
 
 
 def _prune_generations(root: Path, retention: int) -> None:
@@ -455,6 +616,33 @@ def _prune_generations(root: Path, retention: int) -> None:
         if generation_dir not in keep:
             shutil.rmtree(generation_dir)
     _fsync_directory(root)
+
+
+@contextmanager
+def _checkpoint_writer_lock(root: Path, timeout: float) -> Iterator[None]:
+    if fcntl is None:
+        raise RuntimeError("checkpoint writers require POSIX advisory flock support")
+    descriptor = os.open(root / WRITER_LOCK_FILENAME, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    acquired = False
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("checkpoint writer lock timed out") from None
+                time.sleep(min(0.01, remaining))
+        yield
+    finally:
+        try:
+            if acquired:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
 
 
 def save_checkpoint(
@@ -475,6 +663,7 @@ def save_checkpoint(
     failure_injector: FailureInjector | None = None,
     retention: int = 2,
     rng_state: Mapping[str, Any] | None = None,
+    writer_lock_timeout: float = 30.0,
 ) -> CheckpointManifestV2:
     """Atomically publish a trusted-local checkpoint generation.
 
@@ -482,6 +671,8 @@ def save_checkpoint(
     in ``.pt`` is also treated as a directory; callers can pass the same value to
     :func:`load_checkpoint`. ``failure_injector`` receives named durability
     stages and exists solely for deterministic crash testing.
+    POSIX writers serialize through a persistent per-store advisory lock;
+    ``writer_lock_timeout`` bounds acquisition, not checkpoint serialization.
     """
 
     for label, value in (("step", step), ("tokens_seen", tokens_seen)):
@@ -489,6 +680,19 @@ def save_checkpoint(
             raise ValueError(f"checkpoint {label} must be a non-negative integer")
     if isinstance(retention, bool) or not isinstance(retention, int) or retention < 2:
         raise ValueError("checkpoint retention must keep at least two generations")
+    try:
+        valid_timeout = (
+            isinstance(writer_lock_timeout, (int, float))
+            and not isinstance(writer_lock_timeout, bool)
+            and math.isfinite(writer_lock_timeout)
+            and writer_lock_timeout > 0
+        )
+    except OverflowError:
+        valid_timeout = False
+    if not valid_timeout:
+        raise ValueError("checkpoint writer lock timeout must be finite and positive")
+    if fcntl is None:
+        raise RuntimeError("checkpoint writers require POSIX advisory flock support")
     if any(
         not isinstance(value, str) or not value
         for value in (data_fingerprint, tokenizer_fingerprint, run_contract_fingerprint)
@@ -498,6 +702,10 @@ def save_checkpoint(
         cursor_value = None if cursor is None else _json_compatible(cursor)
         if cursor_value is not None and not isinstance(cursor_value, dict):
             raise ValueError("checkpoint cursor must be an object or null")
+        try:
+            _validate_cursor(cursor_value)
+        except CheckpointIntegrityError as error:
+            raise ValueError(str(error)) from error
         json.dumps(cursor_value, allow_nan=False)
         batch_id_values = [str(value) for value in (batch_ids or [])]
         sample_id_values = [[str(sample_id) for sample_id in batch] for batch in (sample_ids or [])]
@@ -520,27 +728,6 @@ def save_checkpoint(
         if "torch_cuda" in rng_state_value:
             validate_cuda_rng_state(rng_state_value, torch.device("cuda:0"))
 
-    root = Path(path)
-    if root.exists() and not root.is_dir():
-        raise CheckpointMismatchError(
-            "checkpoint v2 requires a directory; move the legacy checkpoint first"
-        )
-    root.mkdir(parents=True, exist_ok=True)
-    _cleanup_stale_temporaries(root)
-    _cleanup_uncommitted_generations(root)
-    _assert_store_contract(
-        root,
-        config_fingerprint=config.fingerprint(),
-        data_fingerprint=data_fingerprint,
-        tokenizer_fingerprint=tokenizer_fingerprint,
-        run_contract_fingerprint=run_contract_fingerprint,
-    )
-    generation = _next_generation(root)
-    generation_name = f"generation-{generation:08d}"
-    temporary_dir = root / f".{generation_name}.tmp-{uuid.uuid4().hex}"
-    published_dir = root / generation_name
-    temporary_dir.mkdir()
-
     payload: dict[str, Any] = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "config": config.to_dict(),
@@ -548,8 +735,8 @@ def save_checkpoint(
         "data_fingerprint": data_fingerprint,
         "tokenizer_fingerprint": tokenizer_fingerprint,
         "run_contract_fingerprint": run_contract_fingerprint,
-        "model": model.state_dict(),
-        "optimizer": optimizer.state_dict(),
+        "model": copy.deepcopy(model.state_dict()),
+        "optimizer": copy.deepcopy(optimizer.state_dict()),
         "step": step,
         "tokens_seen": tokens_seen,
         "losses": loss_values,
@@ -558,6 +745,81 @@ def save_checkpoint(
         "sample_ids": sample_id_values,
         "rng_state": capture_rng_state() if rng_state_value is None else rng_state_value,
     }
+    _validate_checkpoint_numerics(
+        {"payload": payload, "runtime_buffers": dict(model.named_buffers(remove_duplicate=False))}
+    )
+    try:
+        _validate_model_aliases(model, payload["model"])
+        _validate_adam_state(optimizer, payload["optimizer"])
+    except CheckpointIntegrityError as error:
+        raise ValueError(str(error)) from error
+
+    root = Path(path)
+    if root.exists() and not root.is_dir():
+        raise CheckpointMismatchError(
+            "checkpoint v2 requires a directory; move the legacy checkpoint first"
+        )
+    root.mkdir(parents=True, exist_ok=True)
+    with _checkpoint_writer_lock(root, writer_lock_timeout):
+        return _publish_checkpoint(
+            root,
+            payload,
+            model=model,
+            optimizer=optimizer,
+            failure_injector=failure_injector,
+            retention=retention,
+        )
+
+
+def _assert_store_progress(
+    root: Path, payload: dict[str, Any], model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> None:
+    for generation_dir in _candidate_generation_directories(root):
+        try:
+            previous, _ = _load_generation_payload(
+                generation_dir,
+                model=model,
+                optimizer=optimizer,
+                expected_config_fingerprint=payload["config_fingerprint"],
+                expected_data_fingerprint=payload["data_fingerprint"],
+                expected_tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+                expected_run_contract_fingerprint=payload["run_contract_fingerprint"],
+            )
+        except CheckpointIntegrityError:
+            continue
+        if payload["step"] < previous["step"] or payload["tokens_seen"] < previous["tokens_seen"]:
+            raise CheckpointMismatchError(
+                "checkpoint progress must not decrease completed step or tokens seen"
+            )
+        return
+
+
+def _publish_checkpoint(
+    root: Path,
+    payload: dict[str, Any],
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    failure_injector: FailureInjector | None,
+    retention: int,
+) -> CheckpointManifestV2:
+    """Publish and prune while the caller holds this store's writer lock."""
+    _cleanup_stale_temporaries(root)
+    _cleanup_uncommitted_generations(root)
+    _assert_store_contract(
+        root,
+        config_fingerprint=payload["config_fingerprint"],
+        data_fingerprint=payload["data_fingerprint"],
+        tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+        run_contract_fingerprint=payload["run_contract_fingerprint"],
+    )
+    _assert_store_progress(root, payload, model, optimizer)
+    generation = _next_generation(root)
+    generation_name = f"generation-{generation:08d}"
+    temporary_dir = root / f".{generation_name}.tmp-{uuid.uuid4().hex}"
+    published_dir = root / generation_name
+    temporary_dir.mkdir()
+
     state_path = temporary_dir / STATE_FILENAME
     with state_path.open("wb") as handle:
         torch.save(payload, handle)
@@ -573,14 +835,14 @@ def save_checkpoint(
         state_file=STATE_FILENAME,
         state_sha256=_sha256(state_path),
         state_bytes=state_path.stat().st_size,
-        completed_step=step,
-        tokens_seen=tokens_seen,
-        config_fingerprint=config.fingerprint(),
-        data_fingerprint=data_fingerprint,
-        tokenizer_fingerprint=tokenizer_fingerprint,
-        run_contract_fingerprint=run_contract_fingerprint,
+        completed_step=payload["step"],
+        tokens_seen=payload["tokens_seen"],
+        config_fingerprint=payload["config_fingerprint"],
+        data_fingerprint=payload["data_fingerprint"],
+        tokenizer_fingerprint=payload["tokenizer_fingerprint"],
+        run_contract_fingerprint=payload["run_contract_fingerprint"],
         state_keys=tuple(sorted(_REQUIRED_STATE_KEYS)),
-        cursor=cursor_value,
+        cursor=payload["cursor"],
     )
     _write_durable_text(
         temporary_dir / MANIFEST_FILENAME,
@@ -606,6 +868,8 @@ def save_checkpoint(
 def _load_legacy_checkpoint(
     path: Path,
     *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
     expected_config: ExperimentConfig,
     expected_data_fingerprint: str | None,
     expected_tokenizer_fingerprint: str | None,
@@ -629,6 +893,11 @@ def _load_legacy_checkpoint(
         raise CheckpointMismatchError(
             "checkpoint configuration does not match experiment"
         )
+    _validate_stored_numerics(payload)
+    if "model" in payload:
+        _validate_model_aliases(model, payload["model"])
+    if "optimizer" in payload:
+        _validate_adam_state(optimizer, payload["optimizer"])
     return payload
 
 
@@ -648,7 +917,9 @@ def load_checkpoint(
     V2 integrity, schema, size, digest, and fingerprint checks happen before
     deserialization. Corrupt newest generations fall back to the preceding
     valid committed generation. Contract mismatches are rejected rather than
-    silently falling back. The trusted-local v1 migration has no sidecar
+    silently falling back. Numerically invalid payloads also fall back before
+    receiver mutation, even when RNG restoration is disabled.
+    The trusted-local v1 migration has no sidecar
     length or digest and is restricted to the synthetic compatibility path.
     """
 
@@ -656,6 +927,8 @@ def load_checkpoint(
     if source.is_file():
         payload = _load_legacy_checkpoint(
             source,
+            model=model,
+            optimizer=optimizer,
             expected_config=expected_config,
             expected_data_fingerprint=expected_data_fingerprint,
             expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,
@@ -680,6 +953,8 @@ def load_checkpoint(
             try:
                 payload, selected_manifest = _load_generation_payload(
                     generation_dir,
+                    model=model,
+                    optimizer=optimizer,
                     expected_config_fingerprint=expected_config.fingerprint(),
                     expected_data_fingerprint=expected_data_fingerprint,
                     expected_tokenizer_fingerprint=expected_tokenizer_fingerprint,

@@ -5,10 +5,11 @@ import json
 import math
 import os
 import sqlite3
+import stat
+import tempfile
 import time
 import urllib.error
 import urllib.request
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -32,6 +33,7 @@ USGS_FEEDS = {
 }
 DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
+MAX_RESPONSE_BYTES = MAX_SNAPSHOT_BYTES
 SQLITE_MAX_INTEGER = 2**63 - 1
 
 
@@ -101,6 +103,17 @@ def _parse_finite_json_float(value: str) -> float:
     return number
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if not isinstance(key, str):
+            raise USGSValidationError("USGS JSON object field names must be strings")
+        if key in result:
+            raise USGSValidationError(f"USGS JSON contains duplicate field {key!r}")
+        result[key] = value
+    return result
+
+
 def _feed_identity(feed: str) -> tuple[str, str]:
     try:
         feed_url = USGS_FEEDS[feed]
@@ -119,6 +132,7 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
     try:
         decoded = json.loads(
             payload.decode("utf-8"),
+            object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_json_float,
         )
@@ -152,16 +166,20 @@ def parse_feature_collection(payload: bytes, *, source: str) -> tuple[EventVersi
         if not isinstance(geometry, dict) or geometry.get("type") != "Point":
             raise USGSValidationError(f"feature {event_id} must have Point geometry")
         coordinates = geometry.get("coordinates")
-        if (
-            not isinstance(coordinates, list)
-            or len(coordinates) < 2
-            or any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                for value in coordinates
+        try:
+            invalid_coordinates = (
+                not isinstance(coordinates, list)
+                or len(coordinates) < 2
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    for value in coordinates
+                )
             )
-        ):
+        except OverflowError as error:
+            raise USGSValidationError(f"feature {event_id} has invalid coordinates") from error
+        if invalid_coordinates:
             raise USGSValidationError(f"feature {event_id} has invalid coordinates")
         identity = (event_id, updated)
         if identity in seen:
@@ -193,6 +211,11 @@ def fetch_feed(
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     retries: int = 3,
 ) -> bytes:
+    """Fetch an allowlisted feed with an exact integer byte budget in [1, 64 MiB].
+
+    Read at most one sentinel byte beyond the budget to detect an oversized response.
+    Invalid budgets fail before the opener or retry backoff is invoked.
+    """
     if feed_url not in USGS_FEEDS.values():
         raise ValueError("feed_url must be one of the allowlisted USGS feeds")
     if isinstance(retries, bool) or not isinstance(retries, int) or not 1 <= retries <= 5:
@@ -204,12 +227,8 @@ def fetch_feed(
         or not math.isfinite(timeout_seconds)
     ):
         raise ValueError("timeout_seconds must be a finite number in (0, 60]")
-    if (
-        isinstance(max_response_bytes, bool)
-        or not isinstance(max_response_bytes, int)
-        or max_response_bytes < 1
-    ):
-        raise ValueError("max_response_bytes must be a positive integer")
+    if type(max_response_bytes) is not int or not 1 <= max_response_bytes <= MAX_RESPONSE_BYTES:
+        raise ValueError("max_response_bytes must be an integer between 1 and 67108864 (64 MiB)")
 
     request = urllib.request.Request(
         feed_url,
@@ -384,6 +403,7 @@ class USGSCaptureLedger:
             try:
                 feature = json.loads(
                     payload_json,
+                    object_pairs_hook=_unique_json_object,
                     parse_constant=_reject_json_constant,
                     parse_float=_parse_finite_json_float,
                 )
@@ -413,6 +433,9 @@ class USGSCaptureLedger:
         output_dir.mkdir(parents=True, exist_ok=True)
         data_name = f"usgs-{content_sha256}.jsonl"
         data_path = output_dir / data_name
+        manifest_path = output_dir / "snapshot-manifest.json"
+        # Reject an unusable rolling alias before publishing any new data artifact.
+        _read_regular_artifact(manifest_path, max_bytes=0)
         _write_content_addressed(data_path, content)
 
         manifest_value: dict[str, Any] = {
@@ -429,7 +452,6 @@ class USGSCaptureLedger:
         }
         manifest_value["snapshot_fingerprint"] = _snapshot_fingerprint(manifest_value)
         manifest = SealedSnapshotV1(**manifest_value)
-        manifest_path = output_dir / "snapshot-manifest.json"
         encoded_manifest = (
             json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
@@ -464,25 +486,70 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _write_atomic(path: Path, content: bytes) -> None:
-    temporary = path.parent / f".{path.name}.tmp-{uuid.uuid4().hex}"
+def _read_regular_artifact(path: Path, *, max_bytes: int) -> tuple[bytes, tuple[int, int]] | None:
     try:
-        with temporary.open("xb") as handle:
+        original = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise USGSValidationError("USGS artifact must be an accessible regular file") from error
+    if not stat.S_ISREG(original.st_mode):
+        raise USGSValidationError("USGS artifact target must be a regular file")
+    identity = (original.st_dev, original.st_ino)
+    try:
+        # O_NONBLOCK prevents a raced FIFO from blocking before fstat rejects it.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != identity:
+                raise USGSValidationError("USGS regular artifact target changed while opening")
+            content = handle.read(max_bytes)
+            current = path.lstat()
+            if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != identity:
+                raise USGSValidationError("USGS regular artifact target changed while reading")
+    except OSError as error:
+        raise USGSValidationError("USGS artifact must remain an accessible regular file") from error
+    return content, identity
+
+
+def _write_atomic(path: Path, content: bytes, *, replace_regular: bool = True) -> None:
+    existing = _read_regular_artifact(path, max_bytes=len(content) + 1)
+    if existing is not None:
+        if existing[0] == content:
+            return
+        if not replace_regular:
+            raise USGSValidationError("content-addressed snapshot path has different bytes")
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.tmp-", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        if existing is None:
+            try:
+                os.link(temporary, path)
+            except FileExistsError as error:
+                winner = _read_regular_artifact(path, max_bytes=len(content) + 1)
+                if winner is None or winner[0] != content:
+                    raise USGSValidationError(
+                        "USGS artifact race winner has different bytes"
+                    ) from error
+        else:
+            current = _read_regular_artifact(path, max_bytes=0)
+            if current is None or current[1] != existing[1]:
+                raise USGSValidationError("USGS regular artifact target changed before publication")
+            os.replace(temporary, path)
         _fsync_directory(path.parent)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _write_content_addressed(path: Path, content: bytes) -> None:
-    if path.exists():
-        if path.read_bytes() != content:
-            raise USGSValidationError("content-addressed snapshot path has different bytes")
-        return
-    _write_atomic(path, content)
+    _write_atomic(path, content, replace_regular=False)
 
 
 def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
@@ -502,6 +569,7 @@ def _validated_snapshot_manifest(manifest_path: Path) -> SealedSnapshotV1:
     try:
         raw = json.loads(
             manifest_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_json_float,
         )
@@ -564,6 +632,7 @@ def load_snapshot(
         for line in lines:
             record = json.loads(
                 line,
+                object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_json_constant,
                 parse_float=_parse_finite_json_float,
             )
@@ -592,6 +661,7 @@ def load_snapshot(
             identities.add(identity)
             feature = json.loads(
                 record["text"],
+                object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_json_constant,
                 parse_float=_parse_finite_json_float,
             )

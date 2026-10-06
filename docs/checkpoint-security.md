@@ -15,6 +15,11 @@ loaded only after their surrounding contract is validated.
 - PyTorch is constrained to `>=2.10,<3`.
 - Every load uses `torch.load(..., weights_only=True)`.
 - For v2 generation stores, state byte length and SHA-256 are checked before deserialization.
+- V2 decoding consumes one captured byte snapshot whose length and SHA-256 are revalidated; later
+  path replacement, in-place writes, or unlinking cannot change the verified decode stream. This
+  adds transient memory for the complete serialized state and stream buffering, alongside tensor
+  and rollback copies. It remains a small-model, trusted-local control, not an unbounded-input or
+  large-checkpoint memory-safety guarantee.
 - The manifest schema, expected keys, model configuration, dataset, tokenizer, and run contract are
   validated before state is accepted.
 - Rejected model, optimizer, or RNG state restores the caller's original training objects and random
