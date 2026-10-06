@@ -33,9 +33,11 @@ Training runs in Python, not in the browser. Use a new output directory each tim
 After dependency installation, this demo needs no network, GPU, account or API key.
 Its pinned CC0 fixture ships with the package, so the installed `fttl-demo`
 also works outside the checkout.
-Preflight checks CPU forward/backward, optimizer execution, local flush/rename,
-atomic JSON publication and exact checkpoint restore. Its private scratch files
-are removed; it does not claim power-loss durability or GPU readiness.
+Preflight checks CPU forward/backward, explicit SGD execution with momentum,
+local flush/rename, atomic JSON publication and exact nonempty momentum checkpoint
+restore. Its private scratch files are removed; it does not measure AdamW readiness,
+power-loss durability or GPU readiness. Actual AdamW training and recovery are
+verified separately by the demo and full CI suite.
 
 Then [generate bounded byte tokens from the recovered checkpoint](docs/generation.md).
 The report binds inference to the verified model and dataset; it demonstrates a

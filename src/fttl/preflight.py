@@ -22,7 +22,8 @@ def preflight(output: Path) -> dict[str, object]:
     """Publish measured checks, including failures, without naming private paths.
 
     Probes use a private temporary below the report's parent, then remove it.
-    This proves current local operations, not power-loss or distributed durability.
+    This uses CPU SGD with momentum, not the training pipeline's AdamW optimizer.
+    It proves current local operations, not power-loss or distributed durability.
     """
     if output.exists() or output.is_symlink():
         raise ValueError("preflight requires a fresh output file")
@@ -64,7 +65,13 @@ def preflight(output: Path) -> dict[str, object]:
                         )
                     )
                     model = TinyTransformer(config.model).to(dtype=torch.float32)
-                    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+                    optimizer = torch.optim.SGD(
+                        model.parameters(),
+                        lr=config.learning_rate,
+                        momentum=0.9,
+                        foreach=False,
+                        fused=False,
+                    )
                     tokens = torch.tensor([[1, 2, 3, 4]], dtype=torch.long, device="cpu")
                     logits, loss = model(tokens, tokens)
                     loss.backward()
@@ -83,8 +90,12 @@ def preflight(output: Path) -> dict[str, object]:
                         losses=[float(loss.detach())],
                     )
                     restored = TinyTransformer(config.model).to(dtype=torch.float32)
-                    restored_optimizer = torch.optim.AdamW(
-                        restored.parameters(), lr=config.learning_rate
+                    restored_optimizer = torch.optim.SGD(
+                        restored.parameters(),
+                        lr=config.learning_rate,
+                        momentum=0.9,
+                        foreach=False,
+                        fused=False,
                     )
                     payload = load_checkpoint(
                         store,
@@ -93,8 +104,27 @@ def preflight(output: Path) -> dict[str, object]:
                         expected_config=config,
                         restore_rng=False,
                     )
+                    momentum_states = (
+                        optimizer.state_dict()["state"],
+                        restored_optimizer.state_dict()["state"],
+                    )
+                    parameter_count = len(list(model.parameters()))
+                    checks["nonempty_sgd_momentum_checkpoint_state"] = all(
+                        bool(states)
+                        and len(states) == parameter_count
+                        and all(
+                            set(value) == {"momentum_buffer"}
+                            and isinstance(value["momentum_buffer"], torch.Tensor)
+                            and value["momentum_buffer"].device.type == "cpu"
+                            and value["momentum_buffer"].dtype == torch.float32
+                            and bool(torch.isfinite(value["momentum_buffer"]).all())
+                            for value in states.values()
+                        )
+                        for states in momentum_states
+                    )
                     checks["checkpoint_roundtrip_exact"] = (
-                        payload["step"] == 1
+                        checks["nonempty_sgd_momentum_checkpoint_state"]
+                        and payload["step"] == 1
                         and state_trees_equal(model.state_dict(), restored.state_dict())
                         and state_trees_equal(
                             optimizer.state_dict(), restored_optimizer.state_dict()
@@ -117,10 +147,13 @@ def preflight(output: Path) -> dict[str, object]:
             "platform": platform.system(),
             "device": "cpu",
             "dtype": "torch.float32",
+            "optimizer": "torch.optim.SGD",
         },
+        "optimizer_policy": {"momentum": 0.9, "foreach": False, "fused": False},
         "limitations": [
             "Local scratch operations do not prove power-loss durability, network filesystem semantics or scale.",
             "No GPU discovery, GPU performance, network binding or production readiness is tested.",
+            "The CPU SGD momentum probe does not measure AdamW training or recovery readiness.",
             "POSIX support is an environment check; this preflight does not send a real kill signal.",
         ],
     }
